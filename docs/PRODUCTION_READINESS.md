@@ -524,3 +524,146 @@ value); every `sk-ant-` match is an obviously-fake, non-functional test placehol
 after each test, or a truncated example in documentation (`sk-ant-...`). No `api_key=`/`secret=`/
 `token=` assignment pattern found anywhere. `ANTHROPIC_API_KEY` is confirmed unset in this
 session's shell environment throughout.
+
+---
+
+## PHASE 3 — Live Web Research
+
+**Audit date:** 2026-10-06, continuing from the Phase 2 baseline (commit `8b02e8a`).
+
+### 1. Audit of the existing web architecture (before changing anything)
+
+Inspected `scripts/web/`, `scripts/web_research.py`, `scripts/sources/`, `scripts/lib/`,
+`career_hunter.py`, `config/`, `schemas/`, `tracking/`, `data/`. Finding: the V1.2/V1.3 boundary
+was already sound — `SourceAdapter`/`SourceRunResult` (live HTTP, honest failure reporting),
+`WebSearchProvider` (search-result abstraction), `source_router`, `page_extractor`,
+`opportunity_extractor`, `browser_queue`, `manual_search_import`, provenance/`confidence_score`,
+`lifecycle_status` staleness, exact+fuzzy deduplication with `alternate_sources`, and
+canonical-key-only company entity resolution all did what their own documentation claimed.
+**Nothing was replaced.** Phase 3 extends this boundary rather than rebuilding it:
+
+```
+SEARCH PROVIDER → SEARCH RESULTS → PAGE FETCHER → PAGE EXTRACTOR → OPPORTUNITY EXTRACTOR →
+NORMALIZATION → DEDUPLICATION → SCORING → AI ANALYSIS
+```
+(unchanged shape; `scripts/sources/*` implement Search API + direct company career pages +
+manual import; `scripts/web/*` implement the search-result → opportunity path; BROWSER_REQUIRED
+sources route to the browser queue instead of an API call — Provider types A–E from the brief
+all have a concrete module, never a fabricated "browser automation" implementation.)
+
+### 2. What was added (extensions, not replacements)
+
+| Addition | File(s) | Why |
+|---|---|---|
+| Persistent, cross-run source health | `scripts/lib/source_health.py`, `tracking/source_health.csv` | `SourceRunResult` already reported per-call status; nothing accumulated it into `AVAILABLE`/`DEGRADED`/`UNAVAILABLE`/`BLOCKED`/`MANUAL` history with `last_success`/`last_failure`/`error_type`/`request_count`/`success_count`. Wired into `scripts.daily_research.run()` (additive — the function's existing return shape is unchanged, one key added). |
+| Company career pages as a first-class source | `scripts/sources/company_careers.py` (extended), `tracking/company_career_pages.csv`, `config/company_career_pages.example.yaml` | Was a single ad-hoc adapter call; now a configurable, persisted list of `{company, career_url, source_type, enabled, last_checked, last_status}` rows, run via `career_hunter.py company-sources --run`. Ships **empty** — no company career URL in this repository has been independently verified, and none was fabricated. |
+| Query-generation safety limits | `config/search_matrix.yaml` (`search_limits`), `scripts/lib/config.py` | `max_queries_per_run` (200), `max_results_per_query` (20), `max_pages` (3, reserved for a future paginated adapter — none paginates today), `max_requests_per_source` (10). `scripts.search_config.build_query_plan()` now defaults its `limit` to `max_queries_per_run` instead of generating unbounded plans (a `--region global` call previously generated ~29,500 queries with no cap). |
+| Research run snapshot | `scripts/research.py`, `data/research_runs/<run_id>.json` | Wraps `scripts.daily_research.run()` (unchanged) and persists `{run_id, started_at, completed_at, queries, providers, results_count, new_jobs, duplicates, errors, source_health, status}` for later trend analysis — nothing like this existed before. |
+| Richer browser queue tasks | `scripts/web/browser_queue.py` | Each task now also carries `task_type` (`OPEN_LINKEDIN_SEARCH`/`OPEN_GLASSDOOR_SEARCH`/`OPEN_UPWORK_SEARCH`/`OPEN_COMPANY_CAREERS`/`OPEN_BOARD_SEARCH`), a real (never fabricated) parameterized search-URL template where one is publicly documented, `reason`, `expected_information`, `status` (`PENDING`), and `created_at`. |
+| `research` / `company-sources` CLI commands | `career_hunter.py` | See §17 below. |
+
+### 3. No fake live search (re-confirmed, not just asserted)
+
+Re-ran the exact network check from Phase 1/2 at the start of this phase:
+```
+$ curl -X POST https://remoteok.com/api        -> CONNECT tunnel failed, 403
+$ curl -X POST https://remotive.com/api/...    -> CONNECT tunnel failed, 403
+$ curl -X POST https://www.indeed.com          -> CONNECT tunnel failed, 403
+$ curl -X POST https://html.duckduckgo.com/... -> CONNECT tunnel failed, 403
+```
+Identical, consistent policy block as every prior phase — this is an organization-level egress
+rule in this sandbox, not a transient failure. `python career_hunter.py research`/`web-search`
+report `SEARCH_PROVIDER_UNAVAILABLE`/per-source `UNAVAILABLE`/`BLOCKED` honestly; nothing was
+simulated. See §12 "How to run research" below for exactly what a non-sandboxed environment needs.
+
+### 4. LinkedIn policy (re-confirmed, no exceptions added)
+
+```
+SEARCH → COLLECT PUBLIC JOB INFORMATION → ANALYZE → PREPARE → HUMAN APPROVAL → ACTION
+```
+`LinkedIn Jobs` remains `access_method: BROWSER_REQUIRED`, `enabled: false` in
+`config/sources.yaml`; it is surfaced in `reports/browser_search_queue.md`
+(`task_type: OPEN_LINKEDIN_SEARCH`) for a human to run manually, never auto-connected,
+auto-messaged, auto-liked/commented, bulk-actioned, or scraped for protected data. No code path
+added this phase touches LinkedIn programmatically.
+
+### 5. Deduplication, freshness, provenance, confidence (audited, not rebuilt)
+
+All four were already correct and are unchanged: `scripts/lib/dedup.merge_duplicates()` preserves
+`alternate_sources` across boards; `scripts/lib/staleness.compute_lifecycle_status()` only returns
+`CLOSED` on explicit textual evidence, never because a job "disappeared" from one result set (it
+has no cross-run "disappeared" signal at all — a `STALE` classification is purely age-based and
+conservative); every opportunity still carries the full `provenance`
+(`source`/`source_url`/`search_query`/`retrieved_at`/`extraction_method`/`confidence`) block and a
+separate `confidence_score`. No changes were needed or made.
+
+### 6. Real Data Policy (§20) — a genuine finding, not a checkbox
+
+While writing Phase 3's own tests, `storage.backup_file()` was found to **always** archive into
+the real `tracking/`-sibling `data/archive/` directory, regardless of where the file being backed
+up actually lived. A test that wrote twice to a `tmp_path` CSV happening to share a real tracker's
+filename (e.g. `source_health.csv`) leaked a real-looking backup file into this repository's own
+`data/archive/` even though every other path in that test was correctly isolated. **Fixed**:
+`backup_file()` now archives next to the file itself when that file isn't inside this
+repository's root, and only uses the real `data/archive/` for a path that genuinely is inside the
+repo. Verified with two regression tests (`test_backup_file_never_writes_into_real_data_archive_for_a_tmp_path`,
+`test_backup_file_still_archives_a_real_repo_path_normally`) and by running the full suite three
+times consecutively with a clean `git status` after each run. This is the kind of "tests must not
+contaminate production data" requirement that's easy to assert and easy to violate by accident —
+worth calling out as a real, previously-undetected risk, not a theoretical one.
+
+Status taxonomy now in consistent use across the codebase: **REAL** (live adapter data, manually
+imported human-collected data), **MANUAL** (a `BROWSER_REQUIRED`/not-yet-run source, visible in
+health tracking without being counted as a failed attempt), **UNAVAILABLE**/**BLOCKED**
+(a source that was actually attempted and failed — `BLOCKED` specifically for an explicit denial
+like a `403`, `UNAVAILABLE` for everything else), **UNKNOWN** (a field with no evidence, left
+`null`/`UNKNOWN` rather than guessed). **SYNTHETIC**/**MOCK** data exists only inside `tests/` via
+`monkeypatch`, confirmed never to reach `tracking/jobs.csv` or any other production tracker by the
+backup-leak fix above and by every test's explicit `tmp_path`/path-patching discipline.
+
+### 7. Source health reporting
+
+```
+Source                         | Status
+Remote OK                      | BLOCKED     (reached the proxy, denied — 403)
+Remotive                       | BLOCKED     (same)
+Manual Import                  | AVAILABLE   (reached fine; EMPTY when data/raw/ has nothing)
+LinkedIn Jobs, Glassdoor, Upwork | MANUAL    (never auto-run, by design)
+Indeed, Bayt, GulfTalent, ...   | MANUAL      (PUBLIC_WEB, not auto-run this cycle — see below)
+```
+`NOT_RUN_THIS_CYCLE` (a `PUBLIC_WEB` board the pipeline didn't call this run) is also mapped to
+`MANUAL`, not `UNAVAILABLE` — a bug caught during this phase's own testing: it was initially
+counting every not-attempted `PUBLIC_WEB` source as a failed request, inflating `request_count`
+for sources that were never actually called. Fixed before being used anywhere real.
+
+### 8. How to add a new provider (unchanged mechanism, now with a concrete recent example)
+
+`scripts/sources/company_careers.py` is the worked example from this phase: implement
+`SourceAdapter.fetch()`, return a `SourceRunResult` with a real status, and — if the source needs
+per-instance configuration like a company's career URL — add a small CSV/YAML config
+(`tracking/company_career_pages.csv` + `config/company_career_pages.example.yaml`) rather than
+hardcoding instances. Nothing in `scripts/intelligence/` needed to change for this.
+
+### 9. How to run research
+
+```bash
+python career_hunter.py research --region gulf              # one cycle + persisted snapshot
+python career_hunter.py research --region global --dry-run   # plan + coverage only, touches nothing
+python career_hunter.py company-sources --add "Acme Architects" --url https://acme.example/careers --source-type architecture_firm
+python career_hunter.py company-sources --run                # check every enabled company career page
+python career_hunter.py browser-queue --region global        # reports/browser_search_queue.md for human-run searches
+```
+
+### 10. Current limitations (Phase 3)
+
+- No live search API or browser-automation provider is connected — `SEARCH_PROVIDER_UNAVAILABLE`
+  is the correct, honest state, confirmed by a fresh network check this phase, not inherited
+  from a stale prior claim.
+- `tracking/company_career_pages.csv` ships empty; it needs a human to supply a real, verified
+  company career URL (`company-sources --add`) before it does anything.
+- `max_pages` is configured but has no paginated adapter to apply it to yet — the next live board
+  with pagination should read it from `scripts.lib.config.search_limits()`.
+- PUBLIC_WEB boards (Indeed, Bayt, ...) still have no HTML parser — `generic_search.py` fetches
+  raw HTML only, same as Phase 1/2/3's prior state.
+- Research snapshots (`data/research_runs/`) have no retention/pruning policy yet; they will
+  accumulate indefinitely under daily use.

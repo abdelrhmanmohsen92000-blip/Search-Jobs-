@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from scripts.lib import config as cfg_lib  # noqa: E402
 from scripts.sources.base import SourceAdapter, SourceRunResult, http_get_json  # noqa: E402
 
 API_URL = "https://remotive.com/api/remote-jobs"
@@ -42,6 +43,8 @@ class RemotiveAdapter(SourceAdapter):
 
     def fetch(self, query=None, limit=None, search_terms=None):
         search_terms = search_terms or DEFAULT_SEARCH_TERMS
+        max_requests = cfg_lib.search_limits()["max_requests_per_source"]
+        search_terms = search_terms[:max_requests]  # Phase 3 safety limit: cap HTTP calls per run, not just results
         all_jobs = {}
         last_error = None
         any_success = False

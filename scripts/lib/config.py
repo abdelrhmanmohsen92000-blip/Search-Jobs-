@@ -66,3 +66,20 @@ def region_for_country(country, matrix=None):
 def countries_for_region(region, matrix=None):
     matrix = matrix or load_search_matrix()
     return matrix.get("regions", {}).get(region, [])
+
+
+DEFAULT_SEARCH_LIMITS = {
+    "max_queries_per_run": 200,
+    "max_results_per_query": 20,
+    "max_pages": 3,
+    "max_requests_per_source": 10,
+}
+
+
+def search_limits(matrix=None):
+    """Phase 3 safety limits (config/search_matrix.yaml `search_limits`),
+    merged over DEFAULT_SEARCH_LIMITS so a partially-specified or missing
+    section never leaves a limit unset.
+    """
+    matrix = matrix or load_search_matrix()
+    return {**DEFAULT_SEARCH_LIMITS, **(matrix.get("search_limits") or {})}

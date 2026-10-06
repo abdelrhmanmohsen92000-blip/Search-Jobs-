@@ -8,12 +8,44 @@ data/raw/search_results/ for scripts/web/manual_search_import.py to pick up.
 """
 import datetime as _dt
 import sys
+import urllib.parse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.lib import config as cfg_lib, paths  # noqa: E402
 from scripts import search_config  # noqa: E402
+
+# Real, publicly documented search-URL templates — a parameterized search
+# page, never a fabricated job listing. None of these is a specific job; a
+# human still reviews and copies real results from the page itself. Sources
+# without a known template get url=None rather than a guessed one.
+_SEARCH_URL_TEMPLATES = {
+    "LinkedIn Jobs": "https://www.linkedin.com/jobs/search/?keywords={q}",
+    "Glassdoor": "https://www.glassdoor.com/Job/jobs.htm?sc.keyword={q}",
+    "Upwork": "https://www.upwork.com/nx/search/jobs/?q={q}",
+    "Indeed": "https://www.indeed.com/jobs?q={q}",
+    "Bayt": "https://www.bayt.com/en/international/jobs/?keyword={q}",
+}
+
+_TASK_TYPE_BY_SOURCE = {
+    "LinkedIn Jobs": "OPEN_LINKEDIN_SEARCH",
+    "Glassdoor": "OPEN_GLASSDOOR_SEARCH",
+    "Upwork": "OPEN_UPWORK_SEARCH",
+}
+
+
+def _search_url(source_name, title, region_name):
+    template = _SEARCH_URL_TEMPLATES.get(source_name)
+    if not template:
+        return None
+    return template.format(q=urllib.parse.quote(f"{title} {region_name.replace('_', ' ')}"))
+
+
+def _task_type(source_name, access_method):
+    if access_method == "COMPANY_CAREERS":
+        return "OPEN_COMPANY_CAREERS"
+    return _TASK_TYPE_BY_SOURCE.get(source_name, "OPEN_BOARD_SEARCH")
 
 HIGH_PRIORITY_TITLES = {
     "bim architect", "bim coordinator", "revit architect", "architectural bim specialist",
@@ -91,13 +123,21 @@ def build_browser_queue(region=None, remote_only=False, freelance_only=False, li
             "No working automated parser for this board yet — run manually and export results the same way, "
             "or contribute a parser (see README 'How to add a new source')."
         )
+        query = f'"{title}" jobs {region_name.replace("_", " ")}'
         tasks.append({
+            "task_type": _task_type(source_name, access_method),
             "source": source_name,
-            "query": f'"{title}" jobs {region_name.replace("_", " ")}',
+            "url": _search_url(source_name, title, region_name),
+            "query": query,
             "region": region_name,
             "priority": priority,
+            "reason": f"{priority}-priority title on a {access_method} source — no automated path exists for this source.",
             "expected_value": _expected_value(access_method, priority),
+            "expected_information": "Job postings matching this query: title, company, location, posting date, and the "
+                                     "job's own URL — export/copy them into data/raw/search_results/ in the SearchResult shape.",
             "manual_action": manual_action,
+            "status": "PENDING",
+            "created_at": _dt.datetime.now().isoformat(timespec="seconds"),
         })
 
     for src in _browser_required_sources():
@@ -130,12 +170,16 @@ def generate_browser_queue_report(tasks, out_path=None):
 
     for i, t in enumerate(tasks, 1):
         lines += [
-            f"{i}. **Source:** {t['source']}",
+            f"{i}. **[{t.get('task_type', 'OPEN_BOARD_SEARCH')}] Source:** {t['source']}",
+            f"   **URL:** {t.get('url') or '(no direct search-URL template for this source — search it manually)'}",
             f"   **Query:** {t['query']}",
             f"   **Region:** {t['region']}",
             f"   **Priority:** {t['priority']}",
+            f"   **Reason:** {t.get('reason', '')}",
             f"   **Expected value:** {t['expected_value']}",
+            f"   **Expected information:** {t.get('expected_information', '')}",
             f"   **Manual instructions:** {t['manual_action']}",
+            f"   **Status:** {t.get('status', 'PENDING')} (created {t.get('created_at', '')})",
             "",
         ]
 

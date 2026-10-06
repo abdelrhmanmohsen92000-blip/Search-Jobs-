@@ -1,0 +1,23 @@
+# EXAMPLE FILE — not real data, not loaded by anything automatically.
+#
+# scripts/sources/company_careers.py monitors company career pages as a
+# first-class source (Phase 3 §11), driven by tracking/company_career_pages.csv
+# (empty by default — this repo has no verified company career URLs to seed
+# it with; never fabricate one). Add a real company here only once you have
+# verified its actual careers URL yourself, then move the row into
+# tracking/company_career_pages.csv — or call:
+#   python3 career_hunter.py company-sources --add "Acme Architects" \
+#       --url https://acme-architects.example.com/careers --source-type architecture_firm
+#
+# source_type is free text for your own organization, e.g.:
+#   architecture_firm, engineering_consultancy, bim_consultancy, contractor,
+#   developer, interior_design_studio, design_build, real_estate,
+#   healthcare_design, hospitality_design
+
+companies:
+  - company: "EXAMPLE — replace with a real, verified company name"
+    career_url: "EXAMPLE — replace with the company's real, verified careers URL"
+    source_type: "architecture_firm"
+    enabled: true
+    last_checked: null
+    last_status: null

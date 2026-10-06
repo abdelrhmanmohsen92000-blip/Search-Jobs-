@@ -368,6 +368,13 @@ python career_hunter.py browser-queue --region global          # writes reports/
 python career_hunter.py web-import --file data/raw/search_results/linkedin.json
 python career_hunter.py web-import --directory data/raw/search_results/
 python career_hunter.py web-import --directory data/raw/search_results/ --dry-run
+
+python career_hunter.py research --region gulf                 # Phase 3: runs daily's pipeline + persists a snapshot to data/research_runs/
+python career_hunter.py research --region global --dry-run
+
+python career_hunter.py company-sources --add "Acme Architects" --url https://acme.example/careers --source-type architecture_firm
+python career_hunter.py company-sources --list
+python career_hunter.py company-sources --run                  # checks every enabled company career page
 ```
 
 `web-search` never pretends to have searched: with no live search API or browser-automation

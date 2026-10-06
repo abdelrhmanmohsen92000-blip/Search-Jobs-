@@ -314,9 +314,12 @@ def test_browser_queue_includes_browser_required_sources_despite_disabled_flag()
 
 def test_browser_queue_tasks_have_required_fields():
     tasks = build_browser_queue(region="europe", limit_per_source=1)
+    required = {"task_type", "source", "url", "query", "region", "priority", "reason",
+                "expected_value", "expected_information", "manual_action", "status", "created_at"}
     for t in tasks:
-        assert set(t) == {"source", "query", "region", "priority", "expected_value", "manual_action"}
+        assert required.issubset(set(t))
         assert t["priority"] in ("HIGH", "MEDIUM", "LOW")
+        assert t["status"] == "PENDING"
 
 
 def test_browser_queue_sorted_by_priority():
@@ -324,6 +327,25 @@ def test_browser_queue_sorted_by_priority():
     priority_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
     ranks = [priority_rank[t["priority"]] for t in tasks]
     assert ranks == sorted(ranks)
+
+
+def test_browser_queue_task_type_mapped_per_source():
+    tasks = build_browser_queue(region="gulf", limit_per_source=1)
+    by_source = {t["source"]: t for t in tasks}
+    assert by_source["LinkedIn Jobs"]["task_type"] == "OPEN_LINKEDIN_SEARCH"
+    assert by_source["Glassdoor"]["task_type"] == "OPEN_GLASSDOOR_SEARCH"
+    assert by_source["Upwork"]["task_type"] == "OPEN_UPWORK_SEARCH"
+
+
+def test_browser_queue_url_uses_real_search_template_never_fabricated_job_url():
+    tasks = build_browser_queue(region="gulf", limit_per_source=1)
+    linkedin_task = next(t for t in tasks if t["source"] == "LinkedIn Jobs")
+    assert linkedin_task["url"].startswith("https://www.linkedin.com/jobs/search/?keywords=")
+    # a source with no known template never gets a guessed URL
+    unmapped_task = next((t for t in tasks if t["source"] not in
+                          ("LinkedIn Jobs", "Glassdoor", "Upwork", "Indeed", "Bayt")), None)
+    if unmapped_task:
+        assert unmapped_task["url"] is None
 
 
 # --- No-fake-data policy -----------------------------------------------------------

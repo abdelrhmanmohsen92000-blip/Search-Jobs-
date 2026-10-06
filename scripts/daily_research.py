@@ -26,6 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.lib import config as cfg_lib, dedup as dedup_lib, normalize as norm_lib, paths, scoring, storage  # noqa: E402
+from scripts.lib import source_health as source_health_lib  # noqa: E402
 from scripts import search_config  # noqa: E402
 from scripts.application_intelligence import build_plans_for_qualifying  # noqa: E402
 from scripts.company_intelligence import hidden_opportunities  # noqa: E402
@@ -95,6 +96,9 @@ def run_source_adapters(enabled_sources=None, limit_per_source=None):
     SourceRunResult.to_dict() — recorded for every attempted source,
     success or failure, never silently dropped (PHASE 17 / SOURCE HEALTH).
     """
+    if limit_per_source is None:
+        limit_per_source = cfg_lib.search_limits()["max_results_per_query"]
+
     raw_records = []
     source_health = []
 
@@ -362,6 +366,7 @@ def run(region=None, remote=False, freelance=False, source_filter=None, limit=No
 
     enabled = [source_filter] if source_filter else None
     raw_records, source_health = run_source_adapters(enabled_sources=enabled, limit_per_source=limit)  # RUN SOURCES / COLLECT
+    persistent_source_health = source_health_lib.update_source_health(source_health)  # cross-run health history
 
     scored, rejected, duplicates = normalize_and_score(raw_records, profile=profile)  # VALIDATE/NORMALIZE/DEDUP/SCORE/RANK
     stats = build_cycle_stats(raw_records, scored, rejected, duplicates, source_health)
@@ -379,7 +384,9 @@ def run(region=None, remote=False, freelance=False, source_filter=None, limit=No
                                          application_plans)  # GENERATE REPORT
     generate_networking_queue()  # GENERATE NETWORKING QUEUE
 
-    return {"dry_run": False, "report_path": report_path, "scored": scored, "stats": stats, "source_health": source_health}
+    return {"dry_run": False, "report_path": report_path, "scored": scored, "stats": stats,
+            "source_health": source_health, "persistent_source_health": persistent_source_health,
+            "query_summary": query_summary}
 
 
 def main():

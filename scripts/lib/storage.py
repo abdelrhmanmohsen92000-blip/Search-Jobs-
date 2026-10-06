@@ -16,11 +16,24 @@ def _timestamp():
 def backup_file(path):
     """Copy an existing file into data/archive/ with a timestamp suffix
     before it gets overwritten. No-op if the file doesn't exist yet.
+
+    Real-data-policy safety net: a file outside this repository's own root
+    (e.g. a pytest tmp_path fixture a test writes to) is archived next to
+    itself instead of into the real paths.DATA_ARCHIVE. Without this, a test
+    that writes twice to a tmp CSV happening to share a real tracker's
+    filename (jobs.csv, source_health.csv, ...) would leak a real-looking
+    backup into this repository's data/archive/ even though every other path
+    involved was correctly isolated — found and fixed during Phase 3 testing.
     """
     if not path.exists():
         return None
-    paths.DATA_ARCHIVE.mkdir(parents=True, exist_ok=True)
-    dest = paths.DATA_ARCHIVE / f"{path.stem}.{_timestamp()}{path.suffix}"
+    try:
+        path.resolve().relative_to(paths.ROOT.resolve())
+        archive_dir = paths.DATA_ARCHIVE
+    except ValueError:
+        archive_dir = path.parent / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    dest = archive_dir / f"{path.stem}.{_timestamp()}{path.suffix}"
     shutil.copy2(path, dest)
     return dest
 

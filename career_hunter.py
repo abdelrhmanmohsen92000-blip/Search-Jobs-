@@ -20,6 +20,8 @@ Commands:
     market                                           (market intelligence: demand signals with sample size)
     alerts                                           (generate reports/alerts.md from current tracking data)
     intelligence [--score-min N] [--deep]           (full pipeline: LOAD->ANALYZE->DECIDE->NETWORK->APPLY->REPORT->LEARN)
+    research     [--region ...] [--remote] [--freelance] [--source <name>] [--limit N] [--dry-run]  (Phase 3: persisted research-run snapshot)
+    company-sources --add <name> --url <url> [--source-type <type>] | --list | --run
 
 Examples:
     python career_hunter.py search --region global
@@ -42,6 +44,10 @@ Examples:
     python career_hunter.py learning
     python career_hunter.py market
     python career_hunter.py intelligence --score-min 70
+    python career_hunter.py research --region gulf
+    python career_hunter.py company-sources --add "Acme Architects" --url https://acme.example/careers --source-type architecture_firm
+    python career_hunter.py company-sources --list
+    python career_hunter.py company-sources --run
 
 V1.4 never sends emails, never sends LinkedIn messages, never applies
 automatically, and never automates browser actions — human approval remains
@@ -51,10 +57,11 @@ import argparse
 import json
 
 from scripts import company_intelligence, networking_intelligence  # noqa: F401
-from scripts import career_intelligence, daily_research, search_config, weekly_analysis, web_research
+from scripts import career_intelligence, daily_research, research, search_config, weekly_analysis, web_research
 from scripts.intelligence import career_strategy as career_strategy_lib
 from scripts.intelligence import learning_engine as learning_engine_lib
 from scripts.lib import paths, storage
+from scripts.sources import company_careers as company_careers_lib
 from scripts.web import browser_queue as browser_queue_lib
 from scripts.web import search_engine as search_engine_lib
 
@@ -276,6 +283,41 @@ def cmd_intelligence(args):
     print(f"Alerts: {len(result['alerts'])} (see reports/alerts.md)")
 
 
+def cmd_research(args):
+    """Phase 3: runs one research cycle and persists a research-run snapshot
+    (data/research_runs/<run_id>.json) for later trend analysis. Clearly
+    reports which providers are available/unavailable — never hides a failure.
+    """
+    snapshot = research.run_research(region=args.region, remote=args.remote, freelance=args.freelance,
+                                      source_filter=args.source, limit=args.limit, dry_run=args.dry_run)
+    research.print_research_summary(snapshot)
+
+
+def cmd_company_sources(args):
+    if args.add:
+        if not args.url:
+            print("--url is required with --add (use the company's real, verified careers URL).")
+            return
+        row = company_careers_lib.add_company_source(args.add, args.url, source_type=args.source_type or "")
+        print(f"Added: {row['company']} -> {row['career_url']}")
+    elif args.list:
+        rows = company_careers_lib.load_company_sources()
+        if not rows:
+            print("No company career pages configured yet. See config/company_career_pages.example.yaml, "
+                  "then `company-sources --add` with a real, verified URL.")
+        for r in rows:
+            print(f"{r['company']} ({r.get('source_type', '')}) — {r['career_url']} "
+                  f"[enabled={r.get('enabled')}, last_status={r.get('last_status') or 'never checked'}]")
+    elif args.run:
+        results = company_careers_lib.run_configured_company_sources()
+        if not results:
+            print("No enabled company career pages to check.")
+        for r in results:
+            print(f"{r.source}: {r.status}" + (f" — {r.error}" if r.error else ""))
+    else:
+        print("Nothing to do. Use --add <name> --url <url>, --list, or --run.")
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="career_hunter.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -367,6 +409,19 @@ def build_parser():
     p_intelligence.add_argument("--score-min", type=float, default=0)
     p_intelligence.add_argument("--deep", action="store_true")
     p_intelligence.set_defaults(func=cmd_intelligence)
+
+    p_research = sub.add_parser("research", help="Run one research cycle and persist a research-run snapshot (Phase 3)")
+    add_region_flags(p_research)
+    p_research.add_argument("--dry-run", action="store_true")
+    p_research.set_defaults(func=cmd_research)
+
+    p_company_sources = sub.add_parser("company-sources", help="Manage first-class company career-page sources (Phase 3)")
+    p_company_sources.add_argument("--add", metavar="COMPANY_NAME", default=None)
+    p_company_sources.add_argument("--url", default=None, help="The company's real, verified careers URL (required with --add)")
+    p_company_sources.add_argument("--source-type", default=None)
+    p_company_sources.add_argument("--list", action="store_true")
+    p_company_sources.add_argument("--run", action="store_true", help="Check every enabled configured company career page")
+    p_company_sources.set_defaults(func=cmd_company_sources)
 
     return parser
 

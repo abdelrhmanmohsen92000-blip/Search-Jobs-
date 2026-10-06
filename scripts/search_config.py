@@ -107,10 +107,19 @@ def build_query_plan(region=None, remote_only=False, freelance_only=False, inclu
     freelance_only: use freelance_keywords instead of job_families titles, and
             only freelance_sources.
     source_filter: restrict to a single source by exact name (--source).
-    limit: cap the number of queries returned (--limit), applied after generation.
+    limit: cap the number of queries returned (--limit). Defaults to
+            config/search_matrix.yaml `search_limits.max_queries_per_run`
+            (Phase 3 safety limit) so an unbounded call (e.g. --region global
+            with no --limit) can never silently explode into tens of
+            thousands of queries. Pass limit=0 explicitly for truly unlimited.
     """
     matrix = cfg_lib.load_search_matrix()
     sources = cfg_lib.load_sources()
+
+    if limit is None:
+        limit = cfg_lib.search_limits(matrix)["max_queries_per_run"]
+    elif limit == 0:
+        limit = None
 
     if freelance_only:
         titles = matrix.get("freelance_keywords", [])
@@ -128,21 +137,28 @@ def build_query_plan(region=None, remote_only=False, freelance_only=False, inclu
 
     regions = _resolve_regions(matrix, region, remote_only)
 
-    plan = []
-    for title, employment_type, region_name, source in itertools.product(titles, employment_types, regions, src_list):
-        plan.append(
-            {
-                "title": title,
-                "employment_type": employment_type,
-                "region": region_name,
-                "countries": cfg_lib.countries_for_region(region_name, matrix),
-                "source": source["name"],
-                "source_access_method": source.get("access_method", "UNKNOWN"),
-                "query_string": f'"{title}" {employment_type} jobs {region_name.replace("_", " ")}',
-            }
-        )
-        if limit and len(plan) >= limit:
-            return plan
+    plan = [
+        {
+            "title": title,
+            "employment_type": employment_type,
+            "region": region_name,
+            "countries": cfg_lib.countries_for_region(region_name, matrix),
+            "source": source["name"],
+            "source_access_method": source.get("access_method", "UNKNOWN"),
+            "query_string": f'"{title}" {employment_type} jobs {region_name.replace("_", " ")}',
+        }
+        for title, employment_type, region_name, source in itertools.product(titles, employment_types, regions, src_list)
+    ]
+
+    if limit and len(plan) > limit:
+        # Evenly-spaced sampling, not a linear prefix truncation: titles are
+        # the outermost itertools.product dimension, so cutting the raw
+        # sequence off at `limit` would silently keep only the first title
+        # and drop every other one once (titles * employment_types * regions
+        # * sources) exceeds `limit` — exactly backwards for "generate
+        # multiple query variants, avoid query explosion" (Phase 3 §7).
+        step = len(plan) / limit
+        plan = [plan[int(i * step)] for i in range(limit)]
     return plan
 
 

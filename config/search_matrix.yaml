@@ -159,3 +159,14 @@ region_priority_signals:
   - remote_feasibility
   - experience_level_fit
   - salary_to_relocation_ratio
+
+# Conservative safety limits for a live research run (Phase 3). These cap
+# query-plan size and per-source request volume so a broad run (e.g.
+# --region global) can never silently explode into tens of thousands of
+# live HTTP calls. scripts/search_config.py and scripts/sources/* read these
+# as defaults — always overridable per-call (e.g. `daily --limit N`).
+search_limits:
+  max_queries_per_run: 200      # caps scripts.search_config.build_query_plan()'s total query count
+  max_results_per_query: 20     # passed to each source adapter's fetch(limit=...)
+  max_pages: 3                  # for a future paginated adapter — no current adapter paginates
+  max_requests_per_source: 10   # caps how many individual HTTP calls one adapter makes per run (e.g. Remotive's per-search-term calls)
