@@ -193,7 +193,7 @@ def test_claude_provider_falls_back_on_simulated_network_failure(monkeypatch):
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
     provider = ClaudeAIProvider(max_retries=0)
-    monkeypatch.setattr(provider, "_post_with_retries", lambda body, headers: (None, "URLError: simulated network failure"))
+    monkeypatch.setattr(provider, "_post_with_retries", lambda body, headers: (None, "URLError: simulated network failure", "API_CALL_FAILED"))
     result = provider.analyze("test prompt", {"a": 1})
     assert result["status"] == "API_CALL_FAILED"
     assert result["fallback_provider"] == "rule_based"
@@ -205,7 +205,7 @@ def test_claude_provider_falls_back_on_malformed_response(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
     provider = ClaudeAIProvider(max_retries=0)
     # a response missing the expected content/usage shape
-    monkeypatch.setattr(provider, "_post_with_retries", lambda body, headers: ({"unexpected": "shape"}, None))
+    monkeypatch.setattr(provider, "_post_with_retries", lambda body, headers: ({"unexpected": "shape"}, None, None))
     result = provider.analyze("test prompt", {"a": 1})
     assert result["status"] == "MALFORMED_RESPONSE"
 
@@ -219,7 +219,7 @@ def test_claude_provider_structured_output_on_simulated_success(monkeypatch):
         "content": [{"type": "text", "text": '{"verdict": "strong fit"}'}],
         "usage": {"input_tokens": 42, "output_tokens": 7},
     }
-    monkeypatch.setattr(provider, "_post_with_retries", lambda body, headers: (fake_response, None))
+    monkeypatch.setattr(provider, "_post_with_retries", lambda body, headers: (fake_response, None, None))
     result = provider.analyze("test prompt", {"a": 1})
     assert result["status"] == "OK"
     assert result["result"] == {"verdict": "strong fit"}
@@ -293,6 +293,166 @@ def test_portfolio_recommendation_works_once_real_project_metadata_exists():
     result = portfolio_recommendation(opp, profile=profile)
     assert result != "PORTFOLIO_DATA_INSUFFICIENT"
     assert result[0]["project"] == "Villa X"
+
+
+def test_portfolio_match_returns_insufficient_without_data():
+    from scripts.intelligence.application_strategy import match_portfolio_projects
+    assert match_portfolio_projects({"project_types": ["Residential"]}, profile={}) == "PORTFOLIO_DATA_INSUFFICIENT"
+
+
+def test_portfolio_match_returns_insufficient_when_no_project_has_evidence():
+    from scripts.intelligence.application_strategy import match_portfolio_projects
+    profile = {"portfolio_projects": [{"name": "Office Tower", "project_types": ["Commercial"]}]}
+    opp = {"project_types": ["Residential"], "software_required": [], "skills_required": []}
+    assert match_portfolio_projects(opp, profile=profile) == "PORTFOLIO_DATA_INSUFFICIENT"
+
+
+def test_portfolio_match_high_relevance_with_multiple_evidence_dimensions():
+    from scripts.intelligence.application_strategy import match_portfolio_projects
+    profile = {"portfolio_projects": [{
+        "name": "Villa Al Noor", "project_types": ["Residential"], "software": ["Autodesk Revit"],
+        "disciplines": ["Architecture"], "role": "BIM Coordinator", "location": "Cairo",
+        "bim_level": "LOD 350", "deliverables": ["Shop drawings"], "achievements": ["Real measurable outcome"],
+    }]}
+    opp = {"project_types": ["Residential"], "software_required": ["Autodesk Revit"], "skills_required": ["Architecture"]}
+    result = match_portfolio_projects(opp, profile=profile)
+    assert result[0]["relevance"] == "HIGH"
+    assert result[0]["confidence"] == "HIGH"
+    assert len(result[0]["evidence"]) == 3
+
+
+def test_portfolio_match_low_confidence_with_sparse_project_metadata():
+    from scripts.intelligence.application_strategy import match_portfolio_projects
+    profile = {"portfolio_projects": [{"name": "Sparse Project", "project_types": ["Residential"]}]}
+    opp = {"project_types": ["Residential"], "software_required": [], "skills_required": []}
+    result = match_portfolio_projects(opp, profile=profile)
+    assert result[0]["relevance"] == "MEDIUM"  # only one evidence dimension (project type)
+    assert result[0]["confidence"] == "LOW"  # almost no optional metadata filled
+
+
+def test_portfolio_match_never_fabricates_evidence_not_actually_overlapping():
+    from scripts.intelligence.application_strategy import match_portfolio_projects
+    profile = {"portfolio_projects": [{"name": "X", "project_types": ["Commercial"], "software": ["Rhino"]}]}
+    opp = {"project_types": ["Residential"], "software_required": ["Autodesk Revit"], "skills_required": []}
+    assert match_portfolio_projects(opp, profile=profile) == "PORTFOLIO_DATA_INSUFFICIENT"
+
+
+# --- AI output safety gate (AI_OUTPUT_INVALID) -------------------------------------------
+
+def test_validate_ai_output_accepts_well_formed_result():
+    from scripts.intelligence.ai_provider import validate_ai_output
+    ok, payload = validate_ai_output({"status": "OK", "result": {"decision": "APPLY"}}, required_keys=["decision"])
+    assert ok is True
+    assert payload == {"decision": "APPLY"}
+
+
+def test_validate_ai_output_rejects_non_ok_status():
+    from scripts.intelligence.ai_provider import validate_ai_output
+    ok, payload = validate_ai_output({"status": "MISSING_API_KEY"})
+    assert ok is False
+    assert payload["status"] == "AI_OUTPUT_INVALID"
+    assert payload["original_status"] == "MISSING_API_KEY"
+
+
+def test_validate_ai_output_rejects_missing_required_key():
+    from scripts.intelligence.ai_provider import validate_ai_output
+    ok, payload = validate_ai_output({"status": "OK", "result": {"other": 1}}, required_keys=["decision"])
+    assert ok is False
+    assert "decision" in payload["reason"]
+
+
+def test_validate_ai_output_never_raises_on_garbage_input():
+    from scripts.intelligence.ai_provider import validate_ai_output
+    ok, payload = validate_ai_output(None)
+    assert ok is False
+    ok, payload = validate_ai_output("a string, not a dict")
+    assert ok is False
+    ok, payload = validate_ai_output({"status": "OK", "result": "not a dict either"})
+    assert ok is False
+
+
+# --- Claude provider: configurable model, distinct failure kinds ------------------------
+
+def test_claude_provider_model_env_var_overrides_configured_model(monkeypatch):
+    from scripts.intelligence.claude_provider import ClaudeAIProvider
+    provider = ClaudeAIProvider(model="claude-sonnet-5", model_env_var="ANTHROPIC_MODEL")
+    assert provider.model == "claude-sonnet-5"
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-opus-5-5")
+    assert provider.model == "claude-opus-5-5"
+
+
+def test_claude_provider_timeout_reported_distinctly(monkeypatch):
+    from scripts.intelligence.claude_provider import ClaudeAIProvider
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
+    provider = ClaudeAIProvider(max_retries=0)
+    monkeypatch.setattr(provider, "_post_with_retries", lambda body, headers: (None, "Timed out after 20s", "TIMEOUT"))
+    result = provider.analyze("test prompt", {})
+    assert result["status"] == "TIMEOUT"
+    assert result["fallback_provider"] == "rule_based"
+
+
+def test_claude_provider_http_error_reported_distinctly(monkeypatch):
+    from scripts.intelligence.claude_provider import ClaudeAIProvider
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
+    provider = ClaudeAIProvider(max_retries=0)
+    monkeypatch.setattr(provider, "_post_with_retries", lambda body, headers: (None, "HTTP 500: Internal Server Error", "HTTP_ERROR"))
+    result = provider.analyze("test prompt", {})
+    assert result["status"] == "HTTP_ERROR"
+
+
+def test_claude_provider_max_tokens_configurable():
+    from scripts.intelligence.claude_provider import ClaudeAIProvider
+    provider = ClaudeAIProvider(max_tokens=256)
+    assert provider.max_tokens == 256
+
+
+def test_claude_provider_real_timeout_exception_classified_correctly(monkeypatch):
+    """Exercises the real _post_with_retries code path (not monkeypatched)
+    with a simulated socket timeout, to confirm the classification logic
+    itself — not just the mocked test above — works."""
+    import socket
+    from scripts.intelligence.claude_provider import ClaudeAIProvider
+
+    def fake_urlopen(*args, **kwargs):
+        raise socket.timeout("timed out")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    provider = ClaudeAIProvider(max_retries=0, timeout=1)
+    result = provider.analyze("test prompt", {})
+    assert result["status"] == "TIMEOUT"
+
+
+def test_smoke_claude_blocked_without_api_key(monkeypatch):
+    from scripts.intelligence.smoke_claude import run_smoke_test
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    result = run_smoke_test()
+    assert result["REAL_AUTHENTICATED_TEST"] == "BLOCKED"
+    assert result["REASON"] == "ANTHROPIC_API_KEY not available"
+
+
+def test_smoke_claude_verified_on_simulated_success(monkeypatch):
+    from scripts.intelligence import smoke_claude
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
+    monkeypatch.setattr(
+        smoke_claude.ClaudeAIProvider, "_post_with_retries",
+        lambda self, body, headers: ({"content": [{"text": '{"ok": true}'}], "usage": {"input_tokens": 5, "output_tokens": 2}}, None, None),
+    )
+    result = smoke_claude.run_smoke_test()
+    assert result["REAL_AUTHENTICATED_TEST"] == "VERIFIED"
+    assert result["parsed_result"] == {"ok": True}
+
+
+def test_smoke_claude_failed_is_never_reported_as_verified(monkeypatch):
+    from scripts.intelligence import smoke_claude
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
+    monkeypatch.setattr(
+        smoke_claude.ClaudeAIProvider, "_post_with_retries",
+        lambda self, body, headers: (None, "HTTP 401: Unauthorized", "HTTP_ERROR"),
+    )
+    result = smoke_claude.run_smoke_test()
+    assert result["REAL_AUTHENTICATED_TEST"] == "FAILED"
+    assert result["REAL_AUTHENTICATED_TEST"] != "VERIFIED"
 
 
 def test_portfolio_project_example_file_matches_its_own_schema():

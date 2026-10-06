@@ -5,16 +5,20 @@ engine — implemented, but NOT selected by default (config/ai.yaml still
 ships `provider: rule_based`) and NEVER required to run this repository or
 its test suite.
 
-IMPORTANT — honesty about what has and hasn't been verified:
-This sandboxed environment has no outbound network access to api.anthropic.com
-(the same egress policy that blocks remoteok.com/remotive.com — see
-scripts/sources/base.py and README "Sources"). That means the HTTP call this
-adapter makes has been written carefully against the documented Anthropic
-Messages API shape, but has NOT been exercised against the real API from
-this environment. Do not take its presence as proof that it works end to
-end — test it for real in an environment with network access before relying
-on it, and treat ANTHROPIC_API_KEY absence/invalidity as the expected
-default state, not an edge case.
+IMPORTANT — honesty about what has and hasn't been verified (updated in the
+Phase 2 production audit, docs/PRODUCTION_READINESS.md):
+This sandboxed environment CAN reach api.anthropic.com — confirmed directly
+with a real request that returned a genuine 401 Unauthorized, both via plain
+curl and via this adapter's own code path with a fake key. That is different
+from remoteok.com/remotive.com, which this same environment's egress policy
+blocks outright (see scripts/sources/base.py and README "Sources"). What
+remains unverified is a *successful, authenticated* call: no real
+ANTHROPIC_API_KEY exists in this environment to test one, and none should be
+placed here to find out. Do not take network reachability as proof the full
+request/response cycle works end to end — run scripts/intelligence/smoke_claude.py
+for real, with a real key, in an environment that has one, before relying on
+this adapter in production. Treat ANTHROPIC_API_KEY absence/invalidity as the
+expected default state here, not an edge case.
 
 What this adapter does NOT assume:
     - It does NOT assume a Claude consumer (claude.ai) subscription grants
@@ -43,20 +47,33 @@ ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_MODEL = "claude-sonnet-5"
 DEFAULT_TIMEOUT = 20
 DEFAULT_MAX_RETRIES = 2
+DEFAULT_MAX_TOKENS = 1024
 
 
 class ClaudeAIProvider(AIProvider):
     """Reads its API key from the environment at call time only — never from
-    this repository, never logged, never persisted to any tracker.
+    this repository, never logged, never persisted to any tracker. The model
+    is likewise configurable from the environment (`model_env_var`, e.g.
+    ANTHROPIC_MODEL), so swapping models never requires a code change — the
+    constructor/config value is only the fallback when that env var is unset.
     """
     name = "claude"
 
-    def __init__(self, model=None, timeout=None, max_retries=None, api_key_env_var="ANTHROPIC_API_KEY"):
-        self.model = model or DEFAULT_MODEL
+    def __init__(self, model=None, timeout=None, max_retries=None, max_tokens=None,
+                 api_key_env_var="ANTHROPIC_API_KEY", model_env_var="ANTHROPIC_MODEL"):
+        self._configured_model = model or DEFAULT_MODEL
         self.timeout = timeout or DEFAULT_TIMEOUT
         self.max_retries = max_retries if max_retries is not None else DEFAULT_MAX_RETRIES
+        self.max_tokens = max_tokens or DEFAULT_MAX_TOKENS
         self.api_key_env_var = api_key_env_var
+        self.model_env_var = model_env_var
         self.last_usage = None  # {"input_tokens": int, "output_tokens": int} after the most recent successful call
+
+    @property
+    def model(self):
+        # environment variable wins, so an operator can switch models without
+        # touching config/ai.yaml or this code
+        return os.environ.get(self.model_env_var) or self._configured_model
 
     def _api_key(self):
         return os.environ.get(self.api_key_env_var)
@@ -79,7 +96,7 @@ class ClaudeAIProvider(AIProvider):
 
         body = {
             "model": self.model,
-            "max_tokens": 1024,
+            "max_tokens": self.max_tokens,
             "system": "Respond with a single JSON object only, no prose outside the JSON.",
             "messages": [{"role": "user", "content": self._build_prompt(prompt, context)}],
         }
@@ -89,9 +106,9 @@ class ClaudeAIProvider(AIProvider):
             "content-type": "application/json",
         }
 
-        data, error = self._post_with_retries(body, headers)
+        data, error, error_kind = self._post_with_retries(body, headers)
         if error:
-            return self._fallback(prompt, context, status="API_CALL_FAILED", note=error)
+            return self._fallback(prompt, context, status=error_kind, note=error)
 
         try:
             text = data["content"][0]["text"]
@@ -117,30 +134,42 @@ class ClaudeAIProvider(AIProvider):
         return f"{prompt}\n\nContext (JSON):\n{json.dumps(context, default=str)}"
 
     def _post_with_retries(self, body, headers):
+        """Returns (data, error_message, error_kind). error_kind is one of
+        TIMEOUT / HTTP_ERROR / API_CALL_FAILED, distinguishing a slow/
+        unreachable network from a server-returned error from any other
+        failure — each surfaces as its own `status` on the caller's result.
+        """
+        import socket
         import time
 
         last_error = None
+        last_kind = "API_CALL_FAILED"
         for attempt in range(self.max_retries + 1):
             try:
                 req = urllib.request.Request(API_URL, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                     if resp.status != 200:
-                        last_error = f"HTTP {resp.status}"
+                        last_error, last_kind = f"HTTP {resp.status}", "HTTP_ERROR"
                     else:
-                        return json.loads(resp.read()), None
+                        return json.loads(resp.read()), None, None
             except urllib.error.HTTPError as e:
-                # 401/403 (bad/missing key) or 429 (rate limit) are not worth retrying blindly;
+                # 401/403 (bad/missing key) are not worth retrying blindly;
                 # still only reported, never retried past max_retries, never treated as success.
-                last_error = f"HTTP {e.code}: {e.reason}"
+                last_error, last_kind = f"HTTP {e.code}: {e.reason}", "HTTP_ERROR"
                 if e.code in (401, 403):
                     break
+            except socket.timeout:
+                last_error, last_kind = f"Timed out after {self.timeout}s", "TIMEOUT"
             except urllib.error.URLError as e:
-                last_error = f"URLError: {e.reason}"
+                if "timed out" in str(e.reason).lower():
+                    last_error, last_kind = f"URLError: {e.reason}", "TIMEOUT"
+                else:
+                    last_error, last_kind = f"URLError: {e.reason}", "API_CALL_FAILED"
             except Exception as e:  # noqa: BLE001 - this adapter must never crash the pipeline
-                last_error = f"{type(e).__name__}: {e}"
+                last_error, last_kind = f"{type(e).__name__}: {e}", "API_CALL_FAILED"
             if attempt < self.max_retries:
                 time.sleep(1.5 ** attempt)
-        return None, last_error
+        return None, last_error, last_kind
 
     def _fallback(self, prompt, context, status, note):
         fallback_result = RuleBasedAIProvider().analyze(prompt, context)

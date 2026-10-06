@@ -16,6 +16,51 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import config as cfg_lib  # noqa: E402
 
 
+def validate_ai_output(response, required_keys=None, expected_type=dict):
+    """AI output safety gate (production audit Phase 2, §8): any AI-produced
+    result must pass through this before it is written into
+    tracking/decisions.csv, tracking/alerts.csv, or an application strategy —
+    never trusted blindly. Callers pass the dict an AIProvider.analyze() call
+    returned.
+
+    Returns (is_valid, payload):
+        - is_valid=True, payload=response["result"]           when the call
+          succeeded (status "OK") AND payload is of expected_type AND (if
+          required_keys given) every key is present.
+        - is_valid=False, payload={"status": "AI_OUTPUT_INVALID", "reason": ...}
+          otherwise — including when the provider itself already reported a
+          failure (MISSING_API_KEY / API_CALL_FAILED / TIMEOUT / HTTP_ERROR /
+          MALFORMED_RESPONSE/NOT_IMPLEMENTED), which this gate re-labels
+          uniformly as AI_OUTPUT_INVALID so every caller has exactly one
+          failure shape to branch on, with `original_status` preserved for
+          debugging.
+
+    This never raises on malformed input — a non-dict `response`, a missing
+    "result" key, anything — all collapse to AI_OUTPUT_INVALID.
+    """
+    if not isinstance(response, dict):
+        return False, {"status": "AI_OUTPUT_INVALID", "reason": "response is not a dict", "original_status": None}
+
+    status = response.get("status")
+    if status != "OK":
+        return False, {"status": "AI_OUTPUT_INVALID", "reason": f"provider status was '{status}', not OK",
+                        "original_status": status}
+
+    result = response.get("result")
+    if not isinstance(result, expected_type):
+        return False, {"status": "AI_OUTPUT_INVALID",
+                        "reason": f"result is {type(result).__name__}, expected {expected_type.__name__}",
+                        "original_status": status}
+
+    if required_keys:
+        missing = [k for k in required_keys if k not in result]
+        if missing:
+            return False, {"status": "AI_OUTPUT_INVALID", "reason": f"missing required keys: {missing}",
+                            "original_status": status}
+
+    return True, result
+
+
 class AIProvider:
     name = "base"
 
@@ -108,7 +153,11 @@ def _build_claude_provider(config):
     meta = (config or {}).get("providers", {}).get("claude", {})
     return ClaudeAIProvider(
         model=meta.get("model"),
+        timeout=meta.get("timeout_seconds"),
+        max_retries=meta.get("max_retries"),
+        max_tokens=meta.get("max_tokens"),
         api_key_env_var=meta.get("api_key_env_var", "ANTHROPIC_API_KEY"),
+        model_env_var=meta.get("model_env_var", "ANTHROPIC_MODEL"),
     )
 
 

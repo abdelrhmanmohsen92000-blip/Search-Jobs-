@@ -7,13 +7,15 @@
 # provider reads its key from an environment variable at call time only
 # (never written here, never logged, never committed).
 
-# Default stays rule_based deliberately (production audit, V1.4.x): a real
-# Claude adapter exists (scripts/intelligence/claude_provider.py) and can be
-# selected by setting provider: claude below PLUS exporting ANTHROPIC_API_KEY
-# in the environment (never in this file, never committed) — but it has not
-# been exercised against the live Anthropic API from this environment (no
-# outbound network access here; see that module's docstring and
-# docs/PRODUCTION_READINESS.md "AI provider requirements"). Do not assume a
+# Default stays rule_based deliberately (production audit, V1.4.x/Phase 2): a
+# real Claude adapter exists (scripts/intelligence/claude_provider.py) and can
+# be selected by setting provider: claude below PLUS exporting
+# ANTHROPIC_API_KEY in the environment (never in this file, never committed).
+# This environment's egress policy DOES allow api.anthropic.com (verified
+# directly: a real request reaches it and gets a genuine 401 without a valid
+# key) — but no *authenticated* call has been verified, since no real API key
+# exists here. See that module's docstring and docs/PRODUCTION_READINESS.md
+# "PHASE 2" for exactly what VERIFIED vs UNKNOWN means here. Do not assume a
 # claude.ai consumer subscription provides this key — it does not; generate
 # one at https://console.anthropic.com/.
 provider: rule_based
@@ -50,11 +52,18 @@ providers:
       subscription (that does not grant API access).
     requires_api_key: true
     api_key_env_var: ANTHROPIC_API_KEY
+    # model is the fallback; the ANTHROPIC_MODEL environment variable (name
+    # configurable via ClaudeAIProvider(model_env_var=...)) overrides it at
+    # call time with no code or config change, so this never needs to be
+    # edited just to switch models.
     model: claude-sonnet-5
+    model_env_var: ANTHROPIC_MODEL
     timeout_seconds: 20
     max_retries: 2
+    max_tokens: 1024
     implemented: true
     verified_against_live_api: false
+    verified_network_reachable: true   # confirmed: api.anthropic.com is NOT blocked by this environment's egress policy
 
   local_llm:
     description: "Placeholder — not implemented. Would call a local inference server (e.g. Ollama) over HTTP."

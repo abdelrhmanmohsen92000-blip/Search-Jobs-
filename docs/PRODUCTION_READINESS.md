@@ -142,12 +142,18 @@ console (`https://console.anthropic.com/`), its own billing, and its own key.
 
 What this audit could and did verify directly, since it couldn't take the instruction's word for
 it either:
-- **This sandboxed environment's egress policy allows `api.anthropic.com`** (confirmed with a
-  direct `curl -X POST https://api.anthropic.com/v1/messages` → real `401 Unauthorized`, and
-  with `ClaudeAIProvider.analyze()` using a fake key → the same real `401` surfaced through the
-  adapter's own error handling). This is different from `remoteok.com`/`remotive.com`, which this
-  same environment's proxy returns `403 connect_rejected` for (an organization-level network
-  policy block, not an API-level auth failure) — see README "Sources".
+- **This sandboxed environment can reach `api.anthropic.com`** (confirmed with a direct
+  `curl -X POST https://api.anthropic.com/v1/messages` → real `401 Unauthorized`, and with
+  `ClaudeAIProvider.analyze()` using a fake key → the same real `401` surfaced through the
+  adapter's own error handling). Checking `env | grep -i proxy` shows why: this session's own
+  proxy configuration lists `api.anthropic.com` in `NO_PROXY` (it talks to Anthropic directly, as
+  the platform this session itself runs on) rather than through the general egress proxy —
+  so reachability here reflects this session's own infrastructure, not a general "outbound HTTPS
+  is allowed" policy. **Do not assume the same holds in a different deployment** (a different
+  sandbox, a production server, a CI runner); verify reachability there independently before
+  relying on it. This is different from `remoteok.com`/`remotive.com`, which this same
+  environment's general-purpose proxy returns `403 connect_rejected` for (an organization-level
+  network policy block, not an API-level auth failure) — see README "Sources".
 - **What was NOT and could not be verified here:** a successful, authenticated call with a real
   key. This environment has no real `ANTHROPIC_API_KEY` to test with, and none should be placed
   here to find out — that is exactly the "do not assume" instruction. The adapter's request shape
@@ -380,3 +386,141 @@ scrapes protected data, or performs bulk actions. This audit added no exceptions
 3. **Fill in real portfolio data** in `config/profile_skills.yaml` following
    `schemas/portfolio_project.schema.json` / `config/portfolio_projects.example.yaml` — this
    activates `portfolio_recommendation()` with zero code changes, verified in this audit.
+
+---
+
+## PHASE 2 — Real Claude + Portfolio Intelligence
+
+**Audit date:** 2026-10-06, continuing from the Phase 1 baseline (commit `f550fec`).
+
+### What was implemented
+
+1. **Personal profile audit (§1 of the Phase 2 brief).** Inspected `profile/profile.md` and
+   `config/profile_skills.yaml` directly rather than trusting the task brief's own summary of the
+   candidate's skills. Finding: the existing files are **already more authoritative** than the
+   brief's list — they additionally record real employers (EDEC, Al-ORABI Engineering Consulting,
+   VISION INTERNATIONAL GROUP, DIZ Studio, freelance work), education, languages, timezone, and
+   relocation preference, none of which the brief's summary included. No fabrication was needed or
+   added; the profile structure is already sufficient for the scoring/AI-analysis code that reads
+   it (`scripts/lib/scoring.py`, `scripts/intelligence/skill_gap.py`). **No change made** — audited
+   and confirmed sufficient, not rewritten.
+2. **Portfolio data (§2).** Searched the entire repository for any CV, resume, or portfolio file
+   (`find . -iname "*cv*" -o -iname "*resume*" -o -iname "*portfolio*"`, plus a check for any
+   `.pdf`/`.docx`) — **none exists**. `profile/profile.md` records employers and broad
+   project-*type* categories (Residential, luxury villas, commercial, ...) but no individually
+   named project with a location, area, date, or specific deliverables. Per the explicit
+   instruction not to fabricate a project name, area, location, client, value, role, LOD,
+   deliverables, dates, responsibilities, or status: **no portfolio project entries were
+   invented.** Instead, `profile/portfolio-intake.md` was created — one stub section per real,
+   verified employer, every field beyond the employer name marked `UNKNOWN`, with instructions for
+   where real entries go once supplied (`config/profile_skills.yaml`'s `portfolio_projects:` key,
+   validated against `schemas/portfolio_project.schema.json`).
+3. **Portfolio → job matching (§3).** `scripts/intelligence/application_strategy.py` gained
+   `match_portfolio_projects(opportunity, profile)`, producing exactly the conceptual shape from
+   the brief:
+   ```
+   {"project": "<name>", "evidence": ["project type(s): ...", "software: ...", "disciplines/skills: ..."],
+    "relevance": "HIGH"/"MEDIUM"/"LOW", "confidence": "HIGH"/"MEDIUM"/"LOW"}
+   ```
+   `relevance` is driven only by how many independent evidence dimensions (project type, software,
+   discipline/skill) actually overlap between the opportunity and a real project record — never a
+   vague similarity score. `confidence` reflects how complete that project's own recorded metadata
+   is (a project with almost no filled-in fields can't support a high-confidence match even with
+   one lucky overlap). Returns `PORTFOLIO_DATA_INSUFFICIENT` when there is no portfolio data or no
+   project has any real evidence — verified with a worked example (synthetic, test-only) producing
+   `HIGH`/`MEDIUM`/`LOW` correctly on both axes, and verified that a project with zero genuine
+   overlap is never force-matched.
+4. **Claude provider audit and hardening (§4).** Reviewed `scripts/intelligence/claude_provider.py`
+   against the full checklist:
+
+   | Item | Before this phase | After this phase |
+   |---|---|---|
+   | Endpoint | `https://api.anthropic.com/v1/messages`, fixed | unchanged |
+   | Auth | `x-api-key` header from `ANTHROPIC_API_KEY` env var | unchanged |
+   | Model config | constructor arg / `config/ai.yaml` only | **now also overridable via `ANTHROPIC_MODEL` env var** (configurable env var name) |
+   | Timeout | 20s default, constructor-configurable | unchanged |
+   | Retries | 2 default, skips retry on 401/403 | unchanged |
+   | Malformed response handling | `MALFORMED_RESPONSE` status + fallback | unchanged |
+   | Structured output | JSON-only system prompt + `json.loads` | unchanged |
+   | Fallback behavior | always falls back to `RuleBasedAIProvider`, labeled | unchanged |
+   | Env var handling | key read at call time only, never stored | unchanged |
+   | Error reporting | single `API_CALL_FAILED` status for all transport failures | **now distinguishes `TIMEOUT` / `HTTP_ERROR` / `API_CALL_FAILED`**, verified against both a mocked and a real `socket.timeout` exception path |
+   | Token/cost metadata | `usage.input_tokens`/`output_tokens` parsed | unchanged |
+   | Max tokens | hardcoded `1024` | **now configurable** (`max_tokens` constructor arg / `config/ai.yaml`) |
+
+   `config/ai.yaml` was updated to document `model_env_var`, `max_tokens`, and to correct a stale
+   claim (see "What was verified" below).
+5. **AI output safety gate (§8).** Added `scripts/intelligence/ai_provider.validate_ai_output()`:
+   a single, reusable validator any future caller MUST pass an `AIProvider.analyze()` result
+   through before writing it into `tracking/decisions.csv`, `tracking/alerts.csv`, or an
+   application strategy. Collapses every non-success provider status (missing key, timeout, HTTP
+   error, malformed JSON, not-implemented) into one uniform `AI_OUTPUT_INVALID` shape with the
+   original status preserved for debugging, and separately validates the parsed result's shape
+   (type + required keys) when the call did succeed — never trusts a Claude response blindly, and
+   never raises on garbage input. **Not yet wired into any caller**, because no current code path
+   routes a Claude response into a decision — `job_analyzer`/`decision_engine` remain deliberately
+   rule-based (see Phase 1's AI cost-control tiers). This gate is the integration point for when
+   that wiring is added later.
+6. **AI cost control (§7).** Unchanged and re-confirmed: `scripts/intelligence/ai_provider.py`'s
+   `tier_for_score()` still gates all analysis by `match_score` (tier 1 `<70` rule-based only,
+   tier 2 `≥70`, tier 3 `≥85`, tier 4 `≥90` full strategy), and nothing added this phase calls the
+   Claude adapter automatically from the pipeline — `ClaudeAIProvider` is only ever invoked
+   explicitly (directly, or via `get_ai_provider({"provider": "claude", ...})`), so there is no
+   path to unbounded API usage from routine `daily`/`intelligence` runs.
+
+### What was VERIFIED vs. MOCKED vs. UNKNOWN vs. BLOCKED
+
+| Claim | Status | Evidence |
+|---|---|---|
+| This environment can reach `api.anthropic.com` | **VERIFIED** | Direct `curl -X POST https://api.anthropic.com/v1/messages` → real `401 Unauthorized`; `ClaudeAIProvider.analyze()` with a fake key reproduced the same real `401` through its own error path (not mocked) |
+| `ClaudeAIProvider`'s timeout/HTTP-error/malformed-response/fallback logic is internally correct | **VERIFIED (via mocks + one real exception path)** | `tests/test_production_audit.py` monkeypatches `_post_with_retries` for the HTTP/timeout/malformed/success cases (mocked transport, real logic), AND separately monkeypatches `urllib.request.urlopen` to raise a genuine `socket.timeout` to exercise the real classification code, not just the mock |
+| A real, authenticated Claude API call succeeds end-to-end | **BLOCKED** | No real `ANTHROPIC_API_KEY` exists in this environment; `scripts/intelligence/smoke_claude.py` reports `REAL_AUTHENTICATED_TEST = BLOCKED, REASON = ANTHROPIC_API_KEY not available` — run directly, not fabricated |
+| A claude.ai consumer subscription provides API access | **Confirmed FALSE** (by design/documentation, not something this environment could test) | Anthropic's own account model: console API keys are a separate product/billing from claude.ai — stated plainly in `claude_provider.py` and `config/ai.yaml`, not assumed to be true or false without that basis |
+| Portfolio matching logic produces correct HIGH/MEDIUM/LOW relevance and confidence | **VERIFIED** | `tests/test_production_audit.py` worked examples (synthetic, not real candidate data) confirm 2+ dimension overlap → HIGH, 1 → MEDIUM, 0 → `PORTFOLIO_DATA_INSUFFICIENT`, and sparse metadata caps confidence at LOW even with a relevant match |
+| Real portfolio data exists for this candidate | **UNKNOWN / not available** | No CV/resume/portfolio file found anywhere in the repository; `profile/portfolio-intake.md` created as the structured next step, with zero fabricated entries |
+
+### Real API smoke test (§5) — exact result from this session
+
+```
+$ python3 scripts/intelligence/smoke_claude.py
+{
+  "REAL_AUTHENTICATED_TEST": "BLOCKED",
+  "REASON": "ANTHROPIC_API_KEY not available"
+}
+```
+This is the literal, unedited output. No personal data was or would be sent in this prompt (the
+smoke prompt is `Reply with exactly the JSON object {"ok": true} and nothing else.`, with empty
+context). The script is intentionally named to avoid pytest's `test_*.py`/`*_test.py` discovery
+patterns, so it never runs automatically inside the normal test suite — the 212 tests in `pytest
+-q` exercise its logic only via explicit monkeypatched unit tests
+(`test_smoke_claude_blocked_without_api_key`, `..._verified_on_simulated_success`,
+`..._failed_is_never_reported_as_verified`), never a real network call.
+
+### How to configure the provider (unchanged mechanism, now documented fully)
+
+```yaml
+# config/ai.yaml
+provider: claude          # default remains rule_based
+providers:
+  claude:
+    api_key_env_var: ANTHROPIC_API_KEY   # NEVER put the key itself here
+    model: claude-sonnet-5                # fallback if ANTHROPIC_MODEL env var is unset
+    model_env_var: ANTHROPIC_MODEL        # overrides `model` above at call time
+    timeout_seconds: 20
+    max_retries: 2
+    max_tokens: 1024
+```
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...   # shell only, never committed
+python3 scripts/intelligence/smoke_claude.py
+```
+
+### Security re-check (§11)
+
+Full-repository grep for `ANTHROPIC_API_KEY`, `sk-ant-`, `api_key`, `secret`, `token` run at the
+end of this phase: every `ANTHROPIC_API_KEY` match is the *environment variable name* (never a
+value); every `sk-ant-` match is an obviously-fake, non-functional test placeholder
+(`sk-ant-test-not-real`) used only inside `monkeypatch.setenv(...)` calls that pytest reverts
+after each test, or a truncated example in documentation (`sk-ant-...`). No `api_key=`/`secret=`/
+`token=` assignment pattern found anywhere. `ANTHROPIC_API_KEY` is confirmed unset in this
+session's shell environment throughout.
