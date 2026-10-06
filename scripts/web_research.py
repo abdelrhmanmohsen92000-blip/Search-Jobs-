@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.daily_research import DEFAULT_SUB_SCORES, JOBS_FIELDNAMES  # noqa: E402
+from scripts.daily_research import DEFAULT_SUB_SCORES, JOBS_FIELDNAMES, opportunity_to_jobs_row  # noqa: E402
 from scripts.lib import config as cfg_lib, dedup as dedup_lib, entity_resolution, normalize as norm_lib  # noqa: E402
 from scripts.lib import paths, scoring, staleness, storage  # noqa: E402
 from scripts.company_intelligence import add_company  # noqa: E402
@@ -111,27 +111,7 @@ def score_and_finalize(candidates, profile=None):
 def save_to_jobs_csv(scored):
     if not scored:
         return
-    storage.append_csv_rows(
-        paths.JOBS_CSV, JOBS_FIELDNAMES,
-        [
-            {
-                "id": o["id"], "date_found": o["date_found"], "source": o["source"],
-                "source_url": o.get("source_url") or "", "job_title": o["job_title"], "company": o["company"],
-                "country": o.get("country") or "", "city": o.get("city") or "", "region": o.get("region") or "",
-                "remote": o.get("remote"), "employment_type": o.get("employment_type") or "",
-                "required_experience": o.get("experience_required") or "",
-                "skills_required": ";".join(o.get("skills_required", [])),
-                "software_required": ";".join(o.get("software_required", [])),
-                "project_types": ";".join(o.get("project_types", [])),
-                "visa_sponsorship": o.get("visa_sponsorship"),
-                "score": o.get("match_score"), "priority": o.get("priority"),
-                "recommendation": o["scoring_result"]["recommendation"],
-                "action": o["scoring_result"]["action"], "status": o.get("status"),
-                "notes": o.get("reason") or "",
-            }
-            for o in scored
-        ],
-    )
+    storage.append_csv_rows(paths.JOBS_CSV, JOBS_FIELDNAMES, [opportunity_to_jobs_row(o) for o in scored])
 
 
 def run_web_import(directory=None, file_path=None, dry_run=False):

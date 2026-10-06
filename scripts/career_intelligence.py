@@ -3,13 +3,15 @@
 
     LOAD -> ANALYZE -> SCORE -> DECIDE -> NETWORK -> APPLICATION STRATEGY -> REPORT -> LEARN
 
-Operates on already-normalized-and-scored opportunities (the full
-scoring_result, including the 8 V1.1 sub-scores, is only available in the
-JSON snapshots scripts/daily_research.py and scripts/web_research.py already
-save to data/processed/ — tracking/jobs.csv itself does not persist the
-sub-scores). LOAD therefore reads the latest such snapshots rather than
-tracking/jobs.csv directly; this adds no new coupling to those pipelines and
-changes nothing about how they run.
+CANONICAL DATA SOURCE (production integration audit finding, fixed here):
+tracking/jobs.csv's header has always declared the 8 V1.1 sub-score columns
+(technical/experience/.../compensation), but no writer populated them until
+this fix (see scripts.daily_research.opportunity_to_jobs_row) — every row's
+sub-scores were silently blank, so this module had to read the ephemeral
+data/processed/*.json snapshots instead of the durable CSV. tracking/jobs.csv
+is now self-sufficient and is LOAD's primary source; snapshots are kept as a
+secondary source only for an id not (yet) present in the CSV, so nothing
+written by an older run (or a test fixture) stops working.
 
 This module never sends anything, never applies anything, and never
 automates LinkedIn/email/browser actions — it only analyzes, decides, drafts,
@@ -24,17 +26,73 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.lib import paths, storage  # noqa: E402
+from scripts.lib.normalize import _bool_or_none, _list_or_empty  # noqa: E402
 from scripts.intelligence import ai_provider, company_analyzer, cv_strategy, decision_engine, job_analyzer  # noqa: E402
 from scripts.intelligence.application_strategy import build_strategy  # noqa: E402
 from scripts.company_intelligence import load_companies  # noqa: E402
 
 SNAPSHOT_PATTERNS = ("daily_opportunities.*.json", "web_import_opportunities.*.json")
+SUB_SCORE_KEYS = ("technical", "experience", "software", "project", "location", "eligibility", "career_value", "compensation")
 
 
-def load_latest_scored_opportunities():
-    """LOAD: merges the most recent snapshot of each known kind from
-    data/processed/, deduplicated by opportunity id (latest file wins per id).
-    Returns [] (never fake data) if no snapshot exists yet.
+def _float_or_none(value):
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def opportunity_from_jobs_row(row):
+    """Reconstructs a normalized opportunity dict (with a `scoring_result`)
+    from one tracking/jobs.csv row — the canonical path LOAD now prefers.
+
+    matched_skills/missing_skills/strengths/risks are NOT stored in the CSV
+    (they're derivable, not canonical facts) and are left empty here;
+    scripts.intelligence.job_analyzer recomputes its own skill_gap from
+    skills_required/software_required rather than reading those fields, so
+    nothing downstream is lost by leaving them empty.
+    """
+    sub_scores = {key: _float_or_none(row.get(key)) for key in SUB_SCORE_KEYS}
+    return {
+        "id": row.get("id"), "date_found": row.get("date_found"), "source": row.get("source"),
+        "source_url": row.get("source_url") or None, "job_title": row.get("job_title"), "company": row.get("company"),
+        "country": row.get("country") or None, "city": row.get("city") or None, "region": row.get("region") or None,
+        "remote": _bool_or_none(row.get("remote")), "employment_type": row.get("employment_type") or None,
+        "experience_required": row.get("required_experience") or None,
+        "skills_required": _list_or_empty((row.get("skills_required") or "").split(";")),
+        "software_required": _list_or_empty((row.get("software_required") or "").split(";")),
+        "project_types": _list_or_empty((row.get("project_types") or "").split(";")),
+        "visa_sponsorship": _bool_or_none(row.get("visa_sponsorship")),
+        "salary_min": _float_or_none(row.get("salary_min")), "salary_max": _float_or_none(row.get("salary_max")),
+        "salary_currency": row.get("salary_currency") or None, "salary_period": row.get("salary_period") or None,
+        "salary_source": row.get("salary_source") or None, "salary_confidence": row.get("salary_confidence") or None,
+        "match_score": _float_or_none(row.get("score")),
+        "priority": row.get("priority") or None,
+        "status": row.get("status") or None,
+        "reason": row.get("notes") or None,
+        "scoring_result": {
+            "score": _float_or_none(row.get("score")),
+            "priority": row.get("priority"),
+            "recommendation": row.get("recommendation"),
+            "action": row.get("action"),
+            **sub_scores,
+            "matched_skills": [], "missing_skills": [], "strengths": [], "risks": [],
+        },
+    }
+
+
+def load_opportunities_from_jobs_csv():
+    """Primary LOAD path: tracking/jobs.csv, the durable canonical tracker."""
+    rows = storage.read_csv(paths.JOBS_CSV)
+    return [opportunity_from_jobs_row(r) for r in rows if r.get("id")]
+
+
+def load_latest_snapshot_opportunities():
+    """Secondary/fallback LOAD path: the most recent snapshot of each known
+    kind from data/processed/, deduplicated by opportunity id (latest file
+    wins per id). Returns [] (never fake data) if no snapshot exists yet.
     """
     if not paths.DATA_PROCESSED.exists():
         return []
@@ -50,6 +108,18 @@ def load_latest_scored_opportunities():
             for opp in data:
                 if opp.get("id"):
                     by_id[opp["id"]] = opp
+    return list(by_id.values())
+
+
+def load_latest_scored_opportunities():
+    """LOAD: tracking/jobs.csv is canonical and takes priority; any
+    opportunity id found only in a data/processed/*.json snapshot (e.g. from
+    a run predating this fix, or a snapshot not yet reconciled into the CSV)
+    is included too, so nothing silently disappears.
+    """
+    by_id = {o["id"]: o for o in load_latest_snapshot_opportunities() if o.get("id")}
+    for o in load_opportunities_from_jobs_csv():
+        by_id[o["id"]] = o  # CSV wins on id collision — it's the canonical source
     return list(by_id.values())
 
 

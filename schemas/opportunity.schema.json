@@ -27,6 +27,20 @@
     "salary_min": { "type": ["number", "null"] },
     "salary_max": { "type": ["number", "null"] },
     "salary_currency": { "type": ["string", "null"] },
+    "salary_period": {
+      "type": ["string", "null"],
+      "enum": ["year", "month", "day", "hour", "project", null],
+      "description": "Production audit (V1.4.x): distinguishes an annual figure from an hourly/project rate so market_intelligence never averages incompatible units."
+    },
+    "salary_source": {
+      "type": ["string", "null"],
+      "description": "Where the figure came from, e.g. 'posting' (stated in the listing) or 'estimate' (inferred) — never blank when a salary is present, so an estimate is never mistaken for a disclosed figure."
+    },
+    "salary_confidence": {
+      "type": ["string", "null"],
+      "enum": ["OBSERVED", "ESTIMATED", "LOW_CONFIDENCE", null],
+      "description": "OBSERVED = stated verbatim in the source; ESTIMATED = inferred from partial data; LOW_CONFIDENCE = present but unreliable. Never defaults to OBSERVED — null until explicitly set."
+    },
     "experience_required": { "type": ["string", "number", "null"] },
     "skills_required": { "type": "array", "items": { "type": "string" }, "default": [] },
     "software_required": { "type": "array", "items": { "type": "string" }, "default": [] },

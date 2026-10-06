@@ -1,0 +1,35 @@
+# EXAMPLE FILE — not real data, not loaded by anything automatically.
+#
+# scripts/intelligence/application_strategy.py's portfolio_recommendation()
+# looks for a `portfolio_projects` list inside config/profile_skills.yaml.
+# This repository has no real, named project metadata today — only the
+# project *type* categories already in profile/profile.md and
+# config/profile_skills.yaml — so portfolio_recommendation() correctly and
+# honestly reports PORTFOLIO_DATA_INSUFFICIENT until real entries exist.
+#
+# TO ACTIVATE: copy the entries you want (with YOUR real project details —
+# never invent one) into config/profile_skills.yaml under a top-level
+# `portfolio_projects:` key, following schemas/portfolio_project.schema.json.
+# Do not just copy this file's example values — they are placeholders only.
+
+portfolio_projects:
+  - name: "EXAMPLE — replace with a real project name"
+    project_types: ["Residential"]           # must match config/profile_skills.yaml project_types
+    location: "EXAMPLE — e.g. Cairo, Egypt"
+    area_sqm: null                            # fill in if known/relevant, else leave null
+    role: "EXAMPLE — e.g. BIM Coordinator"
+    responsibilities:
+      - "EXAMPLE — e.g. Multidisciplinary clash coordination"
+    software: ["Autodesk Revit", "Navisworks"]
+    bim_level: "LOD 350"
+    disciplines: ["Architecture", "Structure"]
+    deliverables: ["Construction documentation", "Shop drawings"]
+    scope:
+      architectural: true
+      interior: false
+      exterior: false
+      landscape: false
+      visualization: false
+    status: "completed"
+    achievements:
+      - "EXAMPLE — a real, measurable outcome, never a vague or invented claim"

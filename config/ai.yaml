@@ -7,6 +7,15 @@
 # provider reads its key from an environment variable at call time only
 # (never written here, never logged, never committed).
 
+# Default stays rule_based deliberately (production audit, V1.4.x): a real
+# Claude adapter exists (scripts/intelligence/claude_provider.py) and can be
+# selected by setting provider: claude below PLUS exporting ANTHROPIC_API_KEY
+# in the environment (never in this file, never committed) — but it has not
+# been exercised against the live Anthropic API from this environment (no
+# outbound network access here; see that module's docstring and
+# docs/PRODUCTION_READINESS.md "AI provider requirements"). Do not assume a
+# claude.ai consumer subscription provides this key — it does not; generate
+# one at https://console.anthropic.com/.
 provider: rule_based
 
 tiers:
@@ -29,11 +38,23 @@ providers:
     implemented: false
 
   claude:
-    description: "Placeholder — not implemented. Would read ANTHROPIC_API_KEY from the environment at call time."
+    description: >
+      Real adapter implemented (scripts/intelligence/claude_provider.py): reads
+      ANTHROPIC_API_KEY from the environment at call time, calls the Anthropic
+      Messages API with timeout+retry, parses structured JSON output, tracks
+      token usage, and falls back to rule_based on any failure (missing key,
+      network error, non-200, malformed response). NOT exercised against the
+      live API from this environment (no outbound network access here) — verify
+      it for real before relying on it in production. Requires a real Anthropic
+      API key from https://console.anthropic.com/, NOT a claude.ai consumer
+      subscription (that does not grant API access).
     requires_api_key: true
     api_key_env_var: ANTHROPIC_API_KEY
     model: claude-sonnet-5
-    implemented: false
+    timeout_seconds: 20
+    max_retries: 2
+    implemented: true
+    verified_against_live_api: false
 
   local_llm:
     description: "Placeholder — not implemented. Would call a local inference server (e.g. Ollama) over HTTP."

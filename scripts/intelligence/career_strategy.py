@@ -79,7 +79,17 @@ def market_intelligence(jobs=None, min_sample_size=MIN_SAMPLE_SIZE):
     remote_count = sum(1 for j in jobs if (j.get("remote") or "").strip().lower() in ("true", "1"))
     freelance_count = sum(1 for j in jobs if (j.get("employment_type") or "").strip().lower() in ("freelance", "project-based"))
 
-    salaries = [j for j in jobs if j.get("salary_min") or j.get("salary_max")] if jobs and "salary_min" in (jobs[0] if jobs else {}) else []
+    salaries = [j for j in jobs if j.get("salary_min") or j.get("salary_max")]
+    observed = [j for j in salaries if (j.get("salary_confidence") or "").upper() == "OBSERVED"]
+    estimated = [j for j in salaries if (j.get("salary_confidence") or "").upper() == "ESTIMATED"]
+
+    if len(observed) >= min_sample_size:
+        salary_pattern = f"{len(observed)} OBSERVED salary record(s) logged — see salary_min/salary_max in tracking/jobs.csv."
+    elif salaries:
+        salary_pattern = (f"Only {len(salaries)} salary record(s) logged ({len(observed)} observed, "
+                           f"{len(estimated)} estimated) — below the sample size needed to call this a pattern.")
+    else:
+        salary_pattern = "DATA_INSUFFICIENT"
 
     return {
         "sample_size": n,
@@ -90,5 +100,7 @@ def market_intelligence(jobs=None, min_sample_size=MIN_SAMPLE_SIZE):
         "remote_demand": {"count": remote_count, "share": round(remote_count / n * 100, 1) if n else None},
         "freelance_demand": {"count": freelance_count, "share": round(freelance_count / n * 100, 1) if n else None},
         "salary_data_available": len(salaries),
-        "salary_pattern": "DATA_INSUFFICIENT" if len(salaries) < min_sample_size else "see salary_min/salary_max in tracking/jobs.csv",
+        "salary_observed_count": len(observed),
+        "salary_estimated_count": len(estimated),
+        "salary_pattern": salary_pattern,
     }

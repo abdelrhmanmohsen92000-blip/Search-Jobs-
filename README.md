@@ -83,6 +83,8 @@ scripts/
 
 profile/profile.md            Human-readable profile (source of truth for the person; keep in sync with config/profile_skills.yaml)
 docs/                         Strategy, scoring, and decision-maker policy documents (prose explanations of the engine)
+                               docs/PRODUCTION_READINESS.md — component-by-component readiness audit, data-flow
+                               findings, real Claude/web-search integration requirements, and next steps
 templates/                    Manual research templates (job/company/contact/outreach) for when a human fills in detail
 tracking/                     CSV trackers: jobs, companies, contacts, networking, applications, decisions, skill_gaps, learning, alerts
 data/

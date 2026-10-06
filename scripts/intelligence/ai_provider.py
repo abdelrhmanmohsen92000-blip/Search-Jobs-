@@ -98,17 +98,43 @@ def tier_for_score(score, tiers=None):
     return 1
 
 
+def _build_claude_provider(config):
+    # Local import: scripts/intelligence/claude_provider.py has no required
+    # dependency the rest of this module needs, and keeping it out of the
+    # module-level import list means a problem in that file can never break
+    # get_ai_provider()'s rule_based default.
+    from scripts.intelligence.claude_provider import ClaudeAIProvider
+
+    meta = (config or {}).get("providers", {}).get("claude", {})
+    return ClaudeAIProvider(
+        model=meta.get("model"),
+        api_key_env_var=meta.get("api_key_env_var", "ANTHROPIC_API_KEY"),
+    )
+
+
 def get_ai_provider(config=None):
     """Returns the configured AIProvider instance. Always succeeds without
     any API key: an unimplemented provider name falls back to rule_based
     behavior (wrapped so callers can see the fallback happened) rather than
-    raising or pretending to call a real API.
+    raising or pretending to call a real API. Selecting 'claude' returns a
+    real adapter (scripts/intelligence/claude_provider.py) that itself falls
+    back safely (MISSING_API_KEY / API_CALL_FAILED / MALFORMED_RESPONSE) when
+    ANTHROPIC_API_KEY isn't set or the call doesn't succeed — it is still
+    never the default; config/ai.yaml ships `provider: rule_based`.
     """
     config = config or cfg_lib.load_ai_config()
     provider_name = (config or {}).get("provider", "rule_based")
+    if not isinstance(provider_name, str):
+        provider_name = "rule_based"
 
     if provider_name in _PROVIDERS:
         return _PROVIDERS[provider_name]()
+
+    if provider_name == "claude":
+        try:
+            return _build_claude_provider(config)
+        except Exception:  # noqa: BLE001 - never let a broken adapter block the pipeline
+            return RuleBasedAIProvider()
 
     provider_meta = (config or {}).get("providers", {}).get(provider_name, {})
     if provider_meta and not provider_meta.get("implemented", False):

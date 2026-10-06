@@ -40,10 +40,51 @@ DEFAULT_SUB_SCORES = {  # neutral defaults when a raw record has no explicit sco
 JOBS_FIELDNAMES = [
     "id", "date_found", "source", "source_url", "job_title", "company", "country", "city",
     "region", "remote", "employment_type", "required_experience", "skills_required",
-    "software_required", "project_types", "visa_sponsorship", "technical", "experience",
-    "software", "project", "location", "eligibility", "career_value", "compensation",
+    "software_required", "project_types", "visa_sponsorship",
+    "salary_min", "salary_max", "salary_currency", "salary_period", "salary_source", "salary_confidence",
+    "technical", "experience", "software", "project", "location", "eligibility", "career_value", "compensation",
     "score", "priority", "recommendation", "action", "status", "notes",
 ]
+
+SUB_SCORE_KEYS = ("technical", "experience", "software", "project", "location", "eligibility", "career_value", "compensation")
+
+
+def opportunity_to_jobs_row(o):
+    """Builds one tracking/jobs.csv row from a normalized, scored opportunity.
+
+    Audit finding (production integration audit): the CSV header has always
+    declared the 8 V1.1 sub-score columns, but no writer ever populated them
+    — every job's technical/experience/.../compensation columns were empty.
+    That forced scripts/career_intelligence.py to read from the ephemeral
+    data/processed/*.json snapshots instead of the tracking CSV, which is
+    supposed to be the durable, canonical record. This is the fix: every
+    writer uses this one function, so tracking/jobs.csv is now
+    self-sufficient — re-deriving a full scoring_result from a CSV row
+    (see career_intelligence.load_opportunities_from_jobs_csv) no longer
+    loses the sub-scores.
+    """
+    sr = o.get("scoring_result") or {}
+    row = {
+        "id": o["id"], "date_found": o["date_found"], "source": o["source"],
+        "source_url": o.get("source_url") or "", "job_title": o["job_title"], "company": o["company"],
+        "country": o.get("country") or "", "city": o.get("city") or "", "region": o.get("region") or "",
+        "remote": o.get("remote"), "employment_type": o.get("employment_type") or "",
+        "required_experience": o.get("experience_required") or "",
+        "skills_required": ";".join(o.get("skills_required", [])),
+        "software_required": ";".join(o.get("software_required", [])),
+        "project_types": ";".join(o.get("project_types", [])),
+        "visa_sponsorship": o.get("visa_sponsorship"),
+        "salary_min": o.get("salary_min"), "salary_max": o.get("salary_max"),
+        "salary_currency": o.get("salary_currency"), "salary_period": o.get("salary_period"),
+        "salary_source": o.get("salary_source"), "salary_confidence": o.get("salary_confidence"),
+        "score": o.get("match_score"), "priority": o.get("priority"),
+        "recommendation": sr.get("recommendation"),
+        "action": sr.get("action"), "status": o.get("status"),
+        "notes": o.get("reason") or "",
+    }
+    for key in SUB_SCORE_KEYS:
+        row[key] = sr.get(key)
+    return row
 
 
 def run_source_adapters(enabled_sources=None, limit_per_source=None):
@@ -328,27 +369,7 @@ def run(region=None, remote=False, freelance=False, source_filter=None, limit=No
     storage.save_run_snapshot("processed", "daily_opportunities", scored)  # SAVE
 
     if scored:
-        storage.append_csv_rows(
-            paths.JOBS_CSV, JOBS_FIELDNAMES,
-            [
-                {
-                    "id": o["id"], "date_found": o["date_found"], "source": o["source"],
-                    "source_url": o.get("source_url") or "", "job_title": o["job_title"], "company": o["company"],
-                    "country": o.get("country") or "", "city": o.get("city") or "", "region": o.get("region") or "",
-                    "remote": o.get("remote"), "employment_type": o.get("employment_type") or "",
-                    "required_experience": o.get("experience_required") or "",
-                    "skills_required": ";".join(o.get("skills_required", [])),
-                    "software_required": ";".join(o.get("software_required", [])),
-                    "project_types": ";".join(o.get("project_types", [])),
-                    "visa_sponsorship": o.get("visa_sponsorship"),
-                    "score": o.get("match_score"), "priority": o.get("priority"),
-                    "recommendation": o["scoring_result"]["recommendation"],
-                    "action": o["scoring_result"]["action"], "status": o.get("status"),
-                    "notes": o.get("reason") or "",
-                }
-                for o in scored
-            ],
-        )
+        storage.append_csv_rows(paths.JOBS_CSV, JOBS_FIELDNAMES, [opportunity_to_jobs_row(o) for o in scored])
 
     application_plans = build_plans_for_qualifying(scored)  # application intelligence, score >= 80
     if application_plans:

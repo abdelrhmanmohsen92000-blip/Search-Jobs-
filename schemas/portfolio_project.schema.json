@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://search-jobs/schemas/portfolio_project.schema.json",
+  "title": "Portfolio Project",
+  "description": "One real, named project for scripts/intelligence/application_strategy.py's portfolio_recommendation() to match against a job's requirements. This repository ships NO real entries — see config/portfolio_projects.example.yaml for the structure and profile/profile.md for how to add your own. Every field is optional except name/project_types; leave a field out rather than guessing at it.",
+  "type": "object",
+  "required": ["name", "project_types"],
+  "properties": {
+    "name": { "type": "string", "description": "A short, real project name/identifier — never invented." },
+    "project_types": {
+      "type": "array", "items": { "type": "string" },
+      "description": "Must match categories used in config/profile_skills.yaml's project_types list (Residential, Luxury Villas, Commercial, ...)."
+    },
+    "location": { "type": ["string", "null"] },
+    "area_sqm": { "type": ["number", "null"], "description": "Gross floor area in square meters, if relevant and known." },
+    "role": { "type": ["string", "null"], "description": "Your actual role on the project, e.g. 'BIM Coordinator', 'Lead Architect'." },
+    "responsibilities": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "software": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Tools actually used on this project." },
+    "bim_level": { "type": ["string", "null"], "enum": ["LOD 100", "LOD 200", "LOD 300", "LOD 350", "LOD 400", "LOD 500", null] },
+    "disciplines": {
+      "type": "array", "items": { "type": "string" }, "default": [],
+      "description": "e.g. Architecture, Structure, MEP — disciplines actually coordinated on this project."
+    },
+    "deliverables": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "scope": {
+      "type": "object",
+      "description": "Which of your own scopes applied to this project — only mark true what you actually did.",
+      "properties": {
+        "architectural": { "type": "boolean", "default": false },
+        "interior": { "type": "boolean", "default": false },
+        "exterior": { "type": "boolean", "default": false },
+        "landscape": { "type": "boolean", "default": false },
+        "visualization": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
+    },
+    "status": { "type": ["string", "null"], "enum": ["completed", "in_progress", "on_hold", null] },
+    "achievements": {
+      "type": "array", "items": { "type": "string" }, "default": [],
+      "description": "Measurable outcomes only, e.g. 'Reduced clash-detection rework by coordinating 4 disciplines in ACC' — never a vague or invented claim."
+    }
+  },
+  "additionalProperties": false
+}
