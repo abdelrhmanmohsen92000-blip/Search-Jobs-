@@ -1,0 +1,146 @@
+# REAL portfolio data — not an example file. Schema: schemas/portfolio_project.schema.json
+#
+# Source: the TAFKEEK design-studio portfolio website (named by the repository
+# owner as their own real, live site). This file's facts are a direct
+# transcription of what the owner stated the site says, not an automated
+# scrape confirmed by this system: during this session, an automated fetch
+# (WebFetch, then curl) of the URL below was attempted and BLOCKED by the
+# sandbox's outbound network egress policy (403 on CONNECT — the same
+# restriction already documented in docs/PRODUCTION_READINESS.md for other
+# external domains this sandbox cannot reach). Because the content could not
+# be independently re-confirmed this session, every record below is marked
+# evidence_status: PARTIAL rather than VERIFIED. A future session with
+# working network access to this domain should re-fetch the page and, only
+# once the exact text is confirmed, update evidence_status to VERIFIED (or
+# correct any fact found to differ) — never upgrade the status without
+# actually re-checking.
+#
+# visual_evidence_status is UNKNOWN for every record below for the same
+# reason: the site is reported to explicitly distinguish confirmed project
+# photography from representative/sample visuals, but the exact per-project
+# wording of that distinction could not be read this session. Do not treat
+# any image on the source site as confirmed photography of a named project
+# until that exact text has been read and visual_evidence_status updated
+# accordingly.
+#
+# Per the task's no-fabrication rules: client names, budgets, exact
+# responsibilities, per-project software/LOD, unstated dates, construction
+# status, project value, team size, drawing/clash counts, and savings are
+# all left out entirely (not guessed) unless explicitly stated on the site.
+# BIM capabilities (Revit, Navisworks, LOD 350+, etc.) and regional
+# experience are recorded at the PROFILE level in config/profile_skills.yaml
+# (verified_capabilities / regional_experience), not copied onto these
+# per-project records, because the site presents them as studio-wide
+# capabilities rather than facts about these four specific projects.
+
+source:
+  type: PORTFOLIO_WEBSITE
+  url: "https://abdelrhmanmohsen92000-blip.github.io/tafkeek-company-portfolio/"
+  retrieved_at: null  # BLOCKED this session (sandbox egress policy) — see note above
+  evidence_status: PARTIAL
+  evidence_notes: >
+    Facts provided by the repository owner as the content of their own live
+    site. Automated verification was attempted (WebFetch + curl) and blocked
+    by network policy; not independently re-confirmed this session.
+
+portfolio_projects:
+  - name: "Square Business Hub"
+    project_types: ["Commercial"]
+    location: "New Damietta, Egypt"
+    area_sqm: 10000
+    role: null
+    responsibilities: []
+    software: []
+    bim_level: null
+    disciplines: []
+    deliverables: []
+    scope:
+      architectural: false
+      interior: false
+      exterior: false
+      landscape: false
+      visualization: false
+    status: null
+    achievements: []
+    source_url: "https://abdelrhmanmohsen92000-blip.github.io/tafkeek-company-portfolio/"
+    source_type: "PORTFOLIO_WEBSITE"
+    source_retrieved_at: null
+    evidence_status: "PARTIAL"
+    evidence_notes: "Stated facts: Commercial, 10,000 m2, New Damietta, Egypt, 2025. Year 2025 not represented in this schema (no year field) — recorded here in evidence_notes only: year = 2025 as stated. No role, software, LOD, responsibilities, or completion status were stated for this project; left UNKNOWN/empty rather than guessed."
+    visual_evidence_status: "UNKNOWN"
+
+  - name: "La-Mer Compound"
+    project_types: ["Residential", "Large-scale Developments"]
+    location: null
+    area_sqm: 150000
+    role: null
+    responsibilities: []
+    software: []
+    bim_level: null
+    disciplines: []
+    deliverables: []
+    scope:
+      architectural: false
+      interior: false
+      exterior: false
+      landscape: false
+      visualization: false
+    status: null
+    achievements: []
+    source_url: "https://abdelrhmanmohsen92000-blip.github.io/tafkeek-company-portfolio/"
+    source_type: "PORTFOLIO_WEBSITE"
+    source_retrieved_at: null
+    evidence_status: "PARTIAL"
+    evidence_notes: "Stated facts: Residential Community, 150,000 m2, 30+ structures. Structure count (30+) is not represented in this schema (no such field) — recorded here only. No location, role, software, or completion status were stated; left UNKNOWN/empty rather than guessed."
+    visual_evidence_status: "UNKNOWN"
+
+  - name: "Supply Chain - Riyadh"
+    project_types: ["Healthcare", "Administrative"]
+    location: "Riyadh, Saudi Arabia"
+    area_sqm: null
+    role: null
+    responsibilities: []
+    software: []
+    bim_level: null
+    disciplines: []
+    deliverables: ["Issued-for-Tender Set"]
+    scope:
+      architectural: false
+      interior: false
+      exterior: false
+      landscape: false
+      visualization: false
+    status: null
+    achievements: []
+    source_url: "https://abdelrhmanmohsen92000-blip.github.io/tafkeek-company-portfolio/"
+    source_type: "PORTFOLIO_WEBSITE"
+    source_retrieved_at: null
+    evidence_status: "PARTIAL"
+    evidence_notes: "Stated facts: Healthcare/Institutional BIM project, Riyadh, Saudi Arabia, delivered as an Issued-for-Tender Set. 'Institutional' recorded via project_types: Administrative (closest existing category in config/profile_skills.yaml); status left null rather than mapped into the completed/in_progress/on_hold enum, since 'Issued-for-Tender' is a documentation-stage term the schema's status enum does not represent and mapping it would be a guess."
+    visual_evidence_status: "UNKNOWN"
+
+  - name: "Private Residential Interiors"
+    project_types: ["Interior Projects", "Residential"]
+    location: "Egypt / Saudi Arabia"
+    area_sqm: null
+    role: null
+    responsibilities:
+      - "Interior design across living, dining, bedroom, and office spaces"
+    software: []
+    bim_level: null
+    disciplines: ["Interior Design"]
+    deliverables: []
+    scope:
+      architectural: false
+      interior: true
+      exterior: false
+      landscape: false
+      visualization: false
+    status: null
+    achievements: []
+    source_url: "https://abdelrhmanmohsen92000-blip.github.io/tafkeek-company-portfolio/"
+    source_type: "PORTFOLIO_WEBSITE"
+    source_retrieved_at: null
+    evidence_status: "PARTIAL"
+    evidence_notes: "Stated facts: Interior Design discipline, Egypt and Saudi Arabia, covering living/dining/bedroom/office spaces. This is a space/discipline category, not a single named building, per the source. No area, role, or completion status were stated; left UNKNOWN/empty rather than guessed."
+    visual_evidence_status: "UNKNOWN"

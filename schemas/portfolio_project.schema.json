@@ -38,6 +38,18 @@
     "achievements": {
       "type": "array", "items": { "type": "string" }, "default": [],
       "description": "Measurable outcomes only, e.g. 'Reduced clash-detection rework by coordinating 4 disciplines in ACC' — never a vague or invented claim."
+    },
+    "source_url": { "type": ["string", "null"], "description": "The external page this project's facts were taken from, if any." },
+    "source_type": { "type": ["string", "null"], "enum": ["PORTFOLIO_WEBSITE", "CV", "FIRSTHAND", null] },
+    "source_retrieved_at": { "type": ["string", "null"], "description": "ISO timestamp of when source_url was actually fetched/confirmed — null if not independently verified yet." },
+    "evidence_status": {
+      "type": ["string", "null"], "enum": ["VERIFIED", "PARTIAL", "UNKNOWN", null],
+      "description": "How confidently this record's facts are confirmed: VERIFIED (independently fetched/confirmed), PARTIAL (asserted by a trusted source but not independently re-verified), UNKNOWN."
+    },
+    "evidence_notes": { "type": ["string", "null"], "description": "Free-text caveats about this record's provenance, e.g. why it is PARTIAL rather than VERIFIED." },
+    "visual_evidence_status": {
+      "type": ["string", "null"], "enum": ["CONFIRMED", "REPRESENTATIVE", "UNKNOWN", null],
+      "description": "Whether any photos/renders associated with this project on its source are confirmed photography of this exact project (CONFIRMED), explicitly representative/sample imagery only (REPRESENTATIVE), or not established (UNKNOWN). Never treat REPRESENTATIVE or UNKNOWN visuals as proof of this project's actual appearance."
     }
   },
   "additionalProperties": false

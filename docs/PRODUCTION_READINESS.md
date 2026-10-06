@@ -667,3 +667,77 @@ python career_hunter.py browser-queue --region global        # reports/browser_s
   raw HTML only, same as Phase 1/2/3's prior state.
 - Research snapshots (`data/research_runs/`) have no retention/pruning policy yet; they will
   accumulate indefinitely under daily use.
+
+---
+
+## PHASE 4 — Real Portfolio Data Source (TAFKEEK)
+
+**Source URL:** `https://abdelrhmanmohsen92000-blip.github.io/tafkeek-company-portfolio/`
+(TAFKEEK design studio portfolio — named by the repository owner as their own live site).
+
+**Verification status: PARTIAL, not VERIFIED.** This phase attempted to independently fetch the
+source URL twice — via the `WebFetch` tool, then via direct `curl` — and both were **blocked by
+the sandbox's outbound network egress policy** (`EGRESS_BLOCKED` / `403` on `CONNECT`), the same
+class of restriction already documented in §4 for job boards and search engines. Every fact below
+is therefore recorded as the repository owner's own description of their site's content, not as
+something this system independently confirmed. `evidence_status: PARTIAL` is set on every record
+this phase added for exactly this reason. A future session with working network access to this
+domain should re-fetch the page and only then upgrade records to `VERIFIED` (or correct anything
+found to differ) — never flip the flag without actually re-checking.
+
+### What was extended (schema + real data, no redesign)
+
+- `schemas/portfolio_project.schema.json` — added six optional fields so a project record can
+  carry its own provenance: `source_url`, `source_type` (`PORTFOLIO_WEBSITE`/`CV`/`FIRSTHAND`),
+  `source_retrieved_at`, `evidence_status` (`VERIFIED`/`PARTIAL`/`UNKNOWN`), `evidence_notes`, and
+  `visual_evidence_status` (`CONFIRMED`/`REPRESENTATIVE`/`UNKNOWN`). All optional; the schema's
+  pre-existing fields and `additionalProperties: false` are unchanged otherwise.
+- `config/portfolio_projects.yaml` (**new file**, separate from the untouched
+  `config/portfolio_projects.example.yaml`) — the four named TAFKEEK projects, plus a top-level
+  `source:` metadata block (`type`, `url`, `retrieved_at: null`, `evidence_status: PARTIAL`,
+  `evidence_notes`).
+- `scripts/lib/paths.py` / `scripts/lib/config.py` — added `PORTFOLIO_PROJECTS` path and
+  `load_portfolio_projects()`; `load_profile_skills()` now merges this file's
+  `portfolio_projects` list and `source` block into the profile dict it already returns, so
+  existing callers need no changes.
+- `config/profile_skills.yaml` — added three **profile-level, not per-project** sections sourced
+  from the same site: `verified_capabilities` (Revit, BIM Coordination, LOD 350+,
+  Plans/Sections/Elevations/Details, Architecture/Structure/MEP Coordination, Navisworks, Clash
+  Detection, Schedules, BOQ, Material Takeoff, BIM 360, ACC, ISO 19650), `regional_experience`
+  (Egypt, Saudi Arabia, UAE, Qatar), and `studio_profile` (TAFKEEK name, disciplines, workflow,
+  Remote Worldwide/Based in Egypt/Remote-Hybrid-On-site/GMT+2/SCE-Eligible/Arabic+English). All
+  marked `evidence_status: PARTIAL` for the same network-block reason above.
+- `scripts/intelligence/application_strategy.py` — added `match_profile_capability_evidence()`,
+  `match_regional_experience()`, and `combined_portfolio_evidence()` implementing the
+  evidence-strength hierarchy `DIRECT_PROJECT_EVIDENCE > PROFILE_CAPABILITY >
+  REGIONAL_EXPERIENCE > INDIRECT_EVIDENCE > NO_EVIDENCE`. `match_portfolio_projects()` itself is
+  unchanged in behavior (now also tags each match `evidence_tier: DIRECT_PROJECT_EVIDENCE`).
+  **Bug fixed in the same pass:** every `profile = profile or cfg_lib.load_profile_skills()` line
+  silently replaced an explicitly-passed empty `profile={}` with the real profile (`{} ` is
+  falsy), which only became observable once real portfolio data existed to leak in. Changed to
+  `profile = cfg_lib.load_profile_skills() if profile is None else profile` throughout.
+
+### Representative-visual limitation (explicit, by design)
+
+The owner's own site is reported to distinguish confirmed project photography from
+representative/sample visuals, but this phase could not read the exact per-project wording
+(network blocked). Every imported project record therefore has `visual_evidence_status: UNKNOWN`
+— **never `CONFIRMED`** — until a session that can actually load the page records which images,
+if any, are confirmed photography of that exact project. No code in this repository treats a
+representative or unknown visual as proof of a project's appearance.
+
+### Unknown fields (left UNKNOWN/empty, never guessed)
+
+Per project: client names, budgets, exact responsibilities, per-project software, per-project
+LOD, unstated completion dates, construction status, project value, team size, drawing/clash
+counts, and percentage improvements — none of these were stated on the site for these four
+projects, so none are recorded. `Supply Chain - Riyadh`'s delivery stage ("Issued-for-Tender
+Set") is recorded as a deliverable string rather than forced into the schema's
+completed/in_progress/on_hold `status` enum, which has no tender-stage value.
+
+### Provenance policy (going forward)
+
+Any future portfolio project added to `config/portfolio_projects.yaml` should carry
+`source_url`/`source_type`/`evidence_status`, and should only be marked `VERIFIED` once actually
+confirmed from a reachable source in the session doing the import — `PARTIAL` is the honest
+default for anything relayed rather than freshly fetched.

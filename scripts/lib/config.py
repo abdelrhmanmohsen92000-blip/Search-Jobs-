@@ -22,8 +22,27 @@ def load_sources():
 
 
 @functools.lru_cache(maxsize=None)
+def load_portfolio_projects():
+    """config/portfolio_projects.yaml (real, verified project records) — a
+    separate file from config/profile_skills.yaml so real portfolio data
+    never has to be hand-merged into the example-laden profile file. Empty
+    dict if the file doesn't exist (nothing to merge, no fabrication).
+    """
+    if not paths.PORTFOLIO_PROJECTS.exists():
+        return {}
+    return _load_yaml(paths.PORTFOLIO_PROJECTS)
+
+
+@functools.lru_cache(maxsize=None)
 def load_profile_skills():
-    return _load_yaml(paths.PROFILE_SKILLS)
+    profile = _load_yaml(paths.PROFILE_SKILLS)
+    extra = load_portfolio_projects()
+    if extra.get("portfolio_projects"):
+        profile = dict(profile)
+        profile["portfolio_projects"] = list(profile.get("portfolio_projects") or []) + list(extra["portfolio_projects"])
+    if extra.get("source"):
+        profile["portfolio_source"] = extra["source"]
+    return profile
 
 
 @functools.lru_cache(maxsize=None)

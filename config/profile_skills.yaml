@@ -62,3 +62,77 @@ languages:
   - Arabic
   - English
 timezone: GMT+2
+
+# --- Studio/profile-level facts from the TAFKEEK portfolio website ---------
+# Source: https://abdelrhmanmohsen92000-blip.github.io/tafkeek-company-portfolio/
+# PARTIAL, not VERIFIED: an automated fetch of this URL was attempted and
+# blocked by this sandbox's network egress policy during the session that
+# added this section (see docs/PRODUCTION_READINESS.md, "PORTFOLIO DATA
+# SOURCE"). These are the owner's own description of their site's content,
+# not independently re-confirmed by this system yet.
+#
+# These are PROFILE-WIDE / studio-level facts, not facts about any single
+# named project. scripts/intelligence/application_strategy.py must never
+# attach a verified_capabilities or regional_experience entry to a specific
+# project in config/portfolio_projects.yaml unless that project's own record
+# explicitly states it — see match_profile_capability_evidence() and
+# match_regional_experience(), which are kept deliberately separate from
+# match_portfolio_projects().
+verified_capabilities:
+  - name: "Autodesk Revit"
+    evidence_status: PARTIAL
+  - name: "BIM Coordination"
+    evidence_status: PARTIAL
+  - name: "LOD 350+"
+    evidence_status: PARTIAL
+  - name: "Plans, Sections, Elevations, Details"
+    evidence_status: PARTIAL
+  - name: "Architecture/Structure/MEP Coordination"
+    evidence_status: PARTIAL
+  - name: "Navisworks"
+    evidence_status: PARTIAL
+  - name: "Clash Detection"
+    evidence_status: PARTIAL
+  - name: "Schedules"
+    evidence_status: PARTIAL
+  - name: "BOQ"
+    evidence_status: PARTIAL
+  - name: "Material Takeoff"
+    evidence_status: PARTIAL
+  - name: "BIM 360"
+    evidence_status: PARTIAL
+  - name: "Autodesk Construction Cloud (ACC)"
+    evidence_status: PARTIAL
+  - name: "ISO 19650"
+    evidence_status: PARTIAL
+
+regional_experience:
+  - country: "Egypt"
+    evidence_status: PARTIAL
+  - country: "Saudi Arabia"
+    evidence_status: PARTIAL
+  - country: "UAE"
+    evidence_status: PARTIAL
+  - country: "Qatar"
+    evidence_status: PARTIAL
+
+studio_profile:
+  name: "TAFKEEK - Design Studio"
+  disciplines:
+    - "Interior Design"
+    - "Exterior/Architectural Design"
+    - "BIM & Technical Documentation"
+  workflow: "Design -> BIM -> Technical Documentation -> Coordination -> Construction-ready delivery"
+  remote_worldwide: true
+  based_in: "Egypt"
+  work_modes: ["Remote", "Hybrid", "On-site"]
+  timezone: "GMT+2"
+  sce_eligible: true
+  languages: ["Arabic", "English"]
+  source_url: "https://abdelrhmanmohsen92000-blip.github.io/tafkeek-company-portfolio/"
+  evidence_status: PARTIAL
+  # NOTE: "TAFKEEK" does not currently appear as an employer in profile/profile.md
+  # (EDEC, Al-ORABI Engineering Consulting, VISION INTERNATIONAL GROUP, DIZ
+  # Studio, Freelance architectural work). This system does not assume or
+  # assert a connection between TAFKEEK and those employers — it is recorded
+  # here only as the named source of the portfolio data above.
