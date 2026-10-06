@@ -378,6 +378,23 @@ python career_hunter.py company-sources --run                  # checks every en
 python career_hunter.py company-sources --run --limit 10        # Phase 4: HIGH-priority companies checked first
 ```
 
+**Phase 4.1 additions (Career Search Modes Engine):** `config/career_state.yaml` records the
+user's current primary goal (e.g. `FULL_TIME`) plus any periodic secondary modes (`REMOTE`,
+`CONTRACT`, `FREELANCE`, `PART_TIME`), each with its own `priority` (HIGH/MEDIUM/LOW),
+`frequency` (daily/weekly/monthly), and employment-type query strategy — editable directly, never
+hard-coded. `scripts/lib/career_state.py` decides which modes are active and due to run (tracked
+in `data/career_mode_runs.json`, not committed); `scripts/career_search_modes.py` runs each due
+mode through the existing `scripts.daily_research.run()` pipeline unchanged, splitting a shared
+query budget across modes proportional to priority (HIGH:MEDIUM:LOW = 3:2:1) so a low-priority
+mode never starves the user's primary goal:
+
+```bash
+python career_hunter.py career-state --show                       # current goal + mode due-status
+python career_hunter.py career-state --dry-run --limit 60          # plan for every due mode, no writes
+python career_hunter.py career-state --mode CONTRACT --region gulf # run one mode regardless of due-ness
+python career_hunter.py career-state --all --limit 100             # run every active mode now
+```
+
 **Phase 4 additions (real job acquisition):** `tracking/source_health.csv` now classifies every
 failure into a canonical `error_type` (`TIMEOUT`/`HTTP_403`/`HTTP_401`/`RATE_LIMITED`/
 `AUTH_REQUIRED`/`NETWORK_ERROR`/`PARSER_ERROR`/`INVALID_RESPONSE`/`PROVIDER_ERROR`/

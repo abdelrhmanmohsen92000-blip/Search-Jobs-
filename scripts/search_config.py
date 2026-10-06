@@ -98,7 +98,7 @@ def _resolve_regions(matrix, region, remote_only):
 
 
 def build_query_plan(region=None, remote_only=False, freelance_only=False, include_browser_required=True,
-                      source_filter=None, limit=None):
+                      source_filter=None, limit=None, employment_types=None):
     """Returns a list of query dicts: {title, employment_type, region, source}.
 
     region: a key from config/search_matrix.yaml `regions`, "global"/"worldwide"/"all"
@@ -112,6 +112,10 @@ def build_query_plan(region=None, remote_only=False, freelance_only=False, inclu
             (Phase 3 safety limit) so an unbounded call (e.g. --region global
             with no --limit) can never silently explode into tens of
             thousands of queries. Pass limit=0 explicitly for truly unlimited.
+    employment_types: Phase 4.1 Career Search Modes Engine override — a
+            specific list of employment types (e.g. a career-state mode's own
+            ["Contract"]) instead of the full matrix list. Ignored when
+            remote_only is set (remote_only always wins, unchanged behavior).
     """
     matrix = cfg_lib.load_search_matrix()
     sources = cfg_lib.load_sources()
@@ -123,17 +127,17 @@ def build_query_plan(region=None, remote_only=False, freelance_only=False, inclu
 
     if freelance_only:
         titles = matrix.get("freelance_keywords", [])
-        employment_types = ["Freelance", "Contract", "Project-based"]
+        resolved_employment_types = employment_types or ["Freelance", "Contract", "Project-based"]
         src_list = searchable_sources(sources, bucket="freelance_sources",
                                        include_browser_required=include_browser_required, source_filter=source_filter)
     else:
         titles = cfg_lib.all_job_titles(matrix)
-        employment_types = matrix.get("employment_types", [])
+        resolved_employment_types = employment_types or matrix.get("employment_types", [])
         src_list = searchable_sources(sources, bucket="job_boards",
                                        include_browser_required=include_browser_required, source_filter=source_filter)
 
     if remote_only:
-        employment_types = ["Remote"]
+        resolved_employment_types = ["Remote"]
 
     regions = _resolve_regions(matrix, region, remote_only)
 
@@ -147,7 +151,7 @@ def build_query_plan(region=None, remote_only=False, freelance_only=False, inclu
             "source_access_method": source.get("access_method", "UNKNOWN"),
             "query_string": f'"{title}" {employment_type} jobs {region_name.replace("_", " ")}',
         }
-        for title, employment_type, region_name, source in itertools.product(titles, employment_types, regions, src_list)
+        for title, employment_type, region_name, source in itertools.product(titles, resolved_employment_types, regions, src_list)
     ]
 
     if limit and len(plan) > limit:

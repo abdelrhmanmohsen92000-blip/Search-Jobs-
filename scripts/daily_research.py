@@ -398,17 +398,25 @@ def generate_daily_report(scored, rejected, duplicates, stats, query_summary, so
     return out_path
 
 
-def run(region=None, remote=False, freelance=False, source_filter=None, limit=None, dry_run=False):
+def run(region=None, remote=False, freelance=False, source_filter=None, limit=None, dry_run=False,
+        employment_types=None, mode=None):
+    """mode/employment_types (Phase 4.1 Career Search Modes Engine): an
+    optional label + employment-type override from scripts.lib.career_state,
+    e.g. running the CONTRACT mode passes employment_types=["Contract"].
+    Neither changes default behavior when omitted (existing callers
+    unaffected) — mode is purely a label carried into stats for reporting.
+    """
     profile = cfg_lib.load_profile_skills()  # LOAD PROFILE
     cfg_lib.load_search_matrix()  # LOAD SEARCH MATRIX
 
     query_plan = search_config.build_query_plan(  # GENERATE SEARCH QUERIES
         region=region, remote_only=remote, freelance_only=freelance, source_filter=source_filter, limit=limit,
+        employment_types=employment_types,
     )
     query_summary = search_config.summarize_plan(query_plan)
 
     if dry_run:
-        return {"dry_run": True, "query_summary": query_summary, "query_plan_sample": query_plan[:10]}
+        return {"dry_run": True, "query_summary": query_summary, "query_plan_sample": query_plan[:10], "mode": mode}
 
     enabled = [source_filter] if source_filter else None
     raw_records, source_health = run_source_adapters(enabled_sources=enabled, limit_per_source=limit)  # RUN SOURCES / COLLECT
@@ -416,6 +424,7 @@ def run(region=None, remote=False, freelance=False, source_filter=None, limit=No
 
     scored, rejected, duplicates = normalize_and_score(raw_records, profile=profile)  # VALIDATE/NORMALIZE/DEDUP/SCORE/RANK
     stats = build_cycle_stats(raw_records, scored, rejected, duplicates, source_health)
+    stats["career_mode"] = mode
 
     storage.save_run_snapshot("processed", "daily_opportunities", scored)  # SAVE
 
@@ -432,7 +441,7 @@ def run(region=None, remote=False, freelance=False, source_filter=None, limit=No
 
     return {"dry_run": False, "report_path": report_path, "scored": scored, "stats": stats,
             "source_health": source_health, "persistent_source_health": persistent_source_health,
-            "query_summary": query_summary}
+            "query_summary": query_summary, "mode": mode}
 
 
 def main():

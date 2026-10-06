@@ -58,6 +58,7 @@ import json
 
 from scripts import company_intelligence, networking_intelligence  # noqa: F401
 from scripts import career_intelligence, daily_research, research, search_config, weekly_analysis, web_research
+from scripts import career_search_modes
 from scripts.intelligence import career_strategy as career_strategy_lib
 from scripts.intelligence import learning_engine as learning_engine_lib
 from scripts.lib import paths, storage
@@ -293,6 +294,29 @@ def cmd_research(args):
     research.print_research_summary(snapshot)
 
 
+def cmd_career_state(args):
+    if args.show:
+        career_search_modes.print_career_state()
+        return
+    if args.mode:
+        modes = {m["name"]: m for m in career_search_modes.career_state.active_modes()}
+        if args.mode not in modes:
+            print(f"Mode '{args.mode}' is not an active mode in config/career_state.yaml. "
+                  f"Active modes: {sorted(modes)}")
+            return
+        result = career_search_modes.run_for_mode(modes[args.mode], region=args.region, limit=args.limit,
+                                                    dry_run=args.dry_run, source_filter=args.source)
+        career_search_modes._print_result(result)
+        return
+    outcome = career_search_modes.run_due_modes(region=args.region, total_limit=args.limit, dry_run=args.dry_run,
+                                                 source_filter=args.source, force_all=args.all)
+    if not outcome["modes_run"]:
+        print(outcome["message"])
+        return
+    for result in outcome["results"]:
+        career_search_modes._print_result(result)
+
+
 def cmd_company_sources(args):
     if args.add:
         if not args.url:
@@ -418,6 +442,16 @@ def build_parser():
     add_region_flags(p_research)
     p_research.add_argument("--dry-run", action="store_true")
     p_research.set_defaults(func=cmd_research)
+
+    p_career_state = sub.add_parser("career-state", help="Career Search Modes Engine (Phase 4.1)")
+    p_career_state.add_argument("--show", action="store_true", help="Print current primary goal + active modes and exit")
+    p_career_state.add_argument("--mode", default=None, help="Run a single named mode regardless of due-ness")
+    p_career_state.add_argument("--region", default=None)
+    p_career_state.add_argument("--limit", type=int, default=None, help="Total query budget split across due modes by priority")
+    p_career_state.add_argument("--source", default=None)
+    p_career_state.add_argument("--dry-run", action="store_true")
+    p_career_state.add_argument("--all", action="store_true", help="Run every active mode regardless of frequency due-ness")
+    p_career_state.set_defaults(func=cmd_career_state)
 
     p_company_sources = sub.add_parser("company-sources", help="Manage first-class company career-page sources (Phase 3)")
     p_company_sources.add_argument("--add", metavar="COMPANY_NAME", default=None)

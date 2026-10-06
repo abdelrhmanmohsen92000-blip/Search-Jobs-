@@ -1,0 +1,63 @@
+# Career Search Modes Engine (Phase 4.1) — scripts/lib/career_state.py.
+#
+# Lets the user's job-search objective change over time without touching
+# code: today's primary goal might be FULL_TIME while periodically also
+# checking FREELANCE/CONTRACT/REMOTE. Edit this file directly to change
+# priorities/frequencies — nothing here is hard-coded into the pipeline.
+#
+# priority: HIGH/MEDIUM/LOW — controls both query-budget share (when a
+#   --limit is split across modes) and ranking in CLI output. Never affects
+#   an individual opportunity's match_score.
+# frequency: daily/weekly/monthly — how often scripts.lib.career_state.due_modes()
+#   considers this mode due to run again (tracked in data/career_mode_runs.json,
+#   not committed — see .gitignore).
+# employment_types: passed straight to scripts.search_config.build_query_plan()'s
+#   employment_types override; must be values from config/search_matrix.yaml's
+#   own employment_types list.
+# freelance_only: when true, uses the freelance_keywords/freelance_sources
+#   query strategy (same mechanism scripts.search_config already has for
+#   `--freelance`) instead of the job_families/job_boards one.
+
+current_primary_goal: FULL_TIME
+
+search_modes:
+  FULL_TIME:
+    enabled: true
+    priority: HIGH
+    frequency: daily
+    employment_types: ["Full-time"]
+    freelance_only: false
+
+  REMOTE:
+    enabled: true
+    priority: MEDIUM
+    frequency: daily
+    employment_types: ["Remote"]
+    freelance_only: false
+
+  CONTRACT:
+    enabled: true
+    priority: LOW
+    frequency: weekly
+    employment_types: ["Contract"]
+    freelance_only: false
+
+  PART_TIME:
+    enabled: false
+    priority: LOW
+    frequency: weekly
+    employment_types: ["Part-time"]
+    freelance_only: false
+
+  FREELANCE:
+    enabled: true
+    priority: LOW
+    frequency: weekly
+    employment_types: ["Freelance", "Project-based"]
+    freelance_only: true
+
+# Where the user expects this to go next, if anywhere — UNKNOWN/empty by
+# default, never inferred. Set this explicitly when a real transition plan
+# exists (e.g. "shift primary goal to FREELANCE once X happens").
+future_career_state:
+  notes: "UNKNOWN — no stated future transition plan yet."

@@ -831,3 +831,66 @@ Scoring model, decision engine, portfolio evidence hierarchy ordering
 (`DIRECT_PROJECT_EVIDENCE > PROFILE_CAPABILITY > REGIONAL_EXPERIENCE > INDIRECT_EVIDENCE >
 NO_EVIDENCE`), company/networking/application intelligence, LinkedIn human-in-the-loop policy, AI
 cost tiers, and all 257 tests that existed before this phase — all still pass unmodified.
+
+---
+
+## PHASE 6 — Career Search Modes, Scheduling & Dynamic Priorities
+
+(Called "Phase 4.1" in the task prompt that drove this work.)
+
+**Core concept:** the system moves from a flat "search for jobs" to "search according to my
+current career strategy" — `config/career_state.yaml` records a `current_primary_goal` (e.g.
+`FULL_TIME`) plus any number of periodic secondary `search_modes` (`REMOTE`, `CONTRACT`,
+`FREELANCE`, `PART_TIME` shipped as sensible, fully editable defaults), each with its own
+`priority`, `frequency`, and employment-type query strategy. Nothing about this is hard-coded.
+
+### What was added
+
+- **`config/career_state.yaml` (new)** — the CAREER STATE data: primary goal, per-mode
+  enabled/priority/frequency/employment_types/freelance_only, and a `future_career_state.notes`
+  field left `UNKNOWN` until the user states an actual transition plan (never inferred).
+- **`scripts/lib/career_state.py` (new)** — `active_modes()` (enabled modes, HIGH-to-LOW sorted),
+  `due_modes()` (which active modes are due today per their `frequency`, using
+  `data/career_mode_runs.json` — not committed — to track last-run timestamps; a mode never run
+  before is always due; a daily mode run this morning is not due again this evening; a weekly mode
+  needs 7+ elapsed days), and `record_mode_run()`.
+- **`scripts/career_search_modes.py` (new)** — the orchestrator. `run_for_mode()` calls
+  `scripts.daily_research.run()` (completely unchanged pipeline) with that mode's
+  `employment_types`/`freelance_only`. `run_due_modes()` runs every due mode in priority order,
+  splitting a shared `--limit` query budget proportional to priority (HIGH:MEDIUM:LOW = 3:2:1 —
+  verified: a 60-query budget across HIGH/MEDIUM/LOW splits 30/20/10) so a low-priority mode can
+  never starve the primary goal's search volume.
+- **`scripts/search_config.py`** — `build_query_plan()` gained an optional `employment_types`
+  override parameter (ignored when `remote_only` is set, which still always wins, unchanged).
+  Fully backward compatible: omitting it reproduces the exact prior query set.
+- **`scripts/daily_research.py`** — `run()` gained optional `employment_types`/`mode` parameters
+  (both `None` by default, zero behavior change for every existing caller) so a mode's query
+  strategy and its label flow through to `stats["career_mode"]` for reporting.
+- **`career_hunter.py career-state`** — new subcommand: `--show`, `--dry-run`, `--mode <name>`
+  (run one mode regardless of due-ness), `--all` (run every active mode now), `--limit` (shared
+  query budget).
+
+### Verified this phase
+
+- `career-state --show` correctly lists the real default modes and their live due/not-due status.
+- `career-state --dry-run --limit 60 --region gulf` split the budget 26/17/9/9 across
+  HIGH/MEDIUM/LOW/LOW modes (proportional to priority, skewed slightly by each mode's own actual
+  combinatorial ceiling) with zero tracker/report writes.
+- `career-state --mode CONTRACT --region gulf --limit 2` ran a single real cycle end-to-end through
+  the unchanged acquisition pipeline and correctly recorded `CONTRACT`'s run timestamp in
+  `data/career_mode_runs.json`.
+- All 285 pre-existing tests (Phases 1-4) still pass unmodified; 20 new tests added
+  (`tests/test_career_search_modes.py`) for config loading, due-mode scheduling (daily/weekly
+  boundaries, never-run-before, malformed timestamps), priority-weighted budget splitting, the
+  `employment_types` override (including that `remote_only` still wins), and dry-run safety
+  (never writes trackers or records a mode as run).
+
+### Explicitly out of scope this phase (not fabricated, not silently skipped)
+
+Per-mode result tagging inside `tracking/jobs.csv` itself (which mode produced which job) was not
+added — `stats["career_mode"]` labels a whole cycle's run, not individual CSV rows, since adding a
+new jobs.csv column is a larger canonical-data-model change than this phase's scope. The live API
+adapters (Remote OK, Remotive) still do not accept an employment-type filter parameter — they
+never did, so `employment_types` only shapes the generated query strings for
+PUBLIC_WEB/company-page/browser-queue sources and the report, consistent with how `--freelance`
+already worked before this phase.
