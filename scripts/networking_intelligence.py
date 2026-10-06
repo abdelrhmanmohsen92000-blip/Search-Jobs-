@@ -113,6 +113,19 @@ def draft_talking_points(record):
     )
 
 
+def suggested_action(record):
+    """Human-performed next step — never automated. See docs/decision-makers.md."""
+    connection = (record.get("connection_status") or "not_connected").lower()
+    message = (record.get("message_status") or "not_drafted").lower()
+    if connection == "not_connected":
+        return "Send a LinkedIn connection request (draft below) — reviewed and sent manually."
+    if connection == "connected" and message in ("not_drafted", "drafted"):
+        return "Send the follow-up message (draft below) — reviewed and sent manually."
+    if message == "sent":
+        return "Awaiting reply — follow up if no response by the next_followup date."
+    return "Review status and decide next step manually."
+
+
 def generate_networking_queue(csv_path=None, out_path=None):
     out_path = out_path or (paths.REPORTS_DIR / "networking_queue.md")
     contacts = load_networking(csv_path)
@@ -139,6 +152,7 @@ def generate_networking_queue(csv_path=None, out_path=None):
             f"- **WHAT TO SAY:** {draft_talking_points(c)}",
             f"- **WHEN:** {c.get('next_followup') or 'Next available networking session'}",
             f"- **LINK:** {c.get('profile_url', '') or '(not recorded)'}",
+            f"- **Suggested Action (human performs this):** {suggested_action(c)}",
             f"- **Status:** connection={c.get('connection_status', '')}, message={c.get('message_status', '')}",
             "",
         ])

@@ -116,15 +116,20 @@ regions:
     - Sweden
     - Norway
     - Denmark
+    - Finland
     - Switzerland
     - Belgium
     - Austria
+    - Czech Republic
   uk:
     - United Kingdom
   north_america:
     - United States
     - Canada
-  australia_nz:
+  oceania:
+    - Australia
+    - New Zealand
+  australia_nz:  # kept as an alias of oceania for backward compatibility
     - Australia
     - New Zealand
   asia:

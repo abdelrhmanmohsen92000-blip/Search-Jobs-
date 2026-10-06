@@ -1,106 +1,380 @@
-# Source registry. Every source is tagged with an access_type so the engine
-# (and whoever runs a research cycle) never assumes it has programmatic
-# access it doesn't have.
+# Source registry — V1.2. Every source declares the fields below so the
+# pipeline (scripts/daily_research.py) and its adapters (scripts/sources/)
+# never assume access they don't have.
 #
-# access_type values:
-#   api_source               - a documented/official API exists and could be
-#                               integrated (credentials/implementation still
-#                               required; none are wired up in V1.1).
-#   searchable_source        - has a public search UI that can be queried by
-#                               a browser-driving agent/session with web
-#                               access, no official API assumed.
-#   requires_manual_or_browser_access - effectively gated (login walls,
-#                               anti-bot, ToS restrictions on scraping) and
-#                               should be worked by a human or a manual
-#                               browser session, not an automated scraper.
+# access_method (ground truth for what an adapter may do):
+#   API            - documented API or public JSON feed; scripts/sources/<name>.py
+#                    makes real HTTP calls (see Remote OK / Remotive).
+#   PUBLIC_WEB     - has a public search UI but no API; only a raw-HTML fetch
+#                    (scripts/sources/generic_search.py) is implemented —
+#                    parsing results requires a future HTML parser or browser
+#                    session (see README "How to add a new source").
+#   BROWSER_REQUIRED - login-gated and/or anti-bot protected. Never scraped;
+#                    requires a human-controlled logged-in browser session,
+#                    results come in via scripts/sources/manual_import.py.
+#   MANUAL         - no board at all; purely human research fed in as JSON.
+#
+# `enabled: false` means the pipeline skips this source entirely (e.g. a
+# board evaluated and found not worth polling) without deleting its record.
 
 job_boards:
-  - name: LinkedIn Jobs
-    url: https://www.linkedin.com/jobs/
-    access_type: requires_manual_or_browser_access
-    notes: Login-gated, anti-scraping ToS. Browse/apply manually or via human-in-the-loop browser session.
-  - name: Indeed
-    url: https://www.indeed.com/
-    access_type: searchable_source
-  - name: Bayt
-    url: https://www.bayt.com/
-    access_type: searchable_source
-  - name: GulfTalent
-    url: https://www.gulftalent.com/
-    access_type: searchable_source
-  - name: Naukrigulf
-    url: https://www.naukrigulf.com/
-    access_type: searchable_source
-  - name: Glassdoor
-    url: https://www.glassdoor.com/
-    access_type: requires_manual_or_browser_access
-    notes: Partial content gated behind login/signup prompts.
-  - name: Wellfound (AngelList Talent)
-    url: https://wellfound.com/
-    access_type: searchable_source
-  - name: ArchDaily Jobs
-    url: https://www.archdaily.com/jobs
-    access_type: searchable_source
-  - name: We Work Remotely
-    url: https://weworkremotely.com/
-    access_type: searchable_source
   - name: Remote OK
-    url: https://remoteok.com/
-    access_type: api_source
-    notes: Publishes a public JSON feed.
+    type: job_board
+    url: https://remoteok.com/api
+    access_method: API
+    api_available: true
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [direct_title, remote]
+    rate_limit_notes: "No documented hard limit; adapter uses timeout=10s, 2 retries with backoff."
+    country_coverage: worldwide_remote
+    job_types: [Full-time, Contract, Remote]
+    reliability: high
+    enabled: true
+
   - name: Remotive
-    url: https://remotive.com/
-    access_type: api_source
-    notes: Has a documented public API.
+    type: job_board
+    url: https://remotive.com/api/remote-jobs
+    access_method: API
+    api_available: true
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [direct_title, remote, keyword]
+    rate_limit_notes: "Public API; adapter queries one request per search term, 2 retries with backoff."
+    country_coverage: worldwide_remote
+    job_types: [Full-time, Contract, Freelance, Remote]
+    reliability: high
+    enabled: true
+
+  - name: LinkedIn Jobs
+    type: job_board
+    url: https://www.linkedin.com/jobs/
+    access_method: BROWSER_REQUIRED
+    api_available: false
+    requires_login: true
+    requires_browser: true
+    supported_search_types: [direct_title, combination, company_discovery]
+    rate_limit_notes: "Anti-scraping ToS. Never automate — human-in-the-loop only."
+    country_coverage: global
+    job_types: [Full-time, Part-time, Contract, Remote, Hybrid, On-site]
+    reliability: n/a
+    enabled: false
+
+  - name: Indeed
+    type: job_board
+    url: https://www.indeed.com/
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [direct_title, combination]
+    rate_limit_notes: "No public API; generic_search.py fetches raw HTML only, no parser wired up yet."
+    country_coverage: global
+    job_types: [Full-time, Part-time, Contract, Remote, Hybrid, On-site]
+    reliability: medium
+    enabled: true
+
+  - name: Bayt
+    type: job_board
+    url: https://www.bayt.com/
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [direct_title, combination]
+    rate_limit_notes: "No public API; raw-HTML fetch only."
+    country_coverage: gulf_middle_east
+    job_types: [Full-time, Contract, On-site]
+    reliability: medium
+    enabled: true
+
+  - name: GulfTalent
+    type: job_board
+    url: https://www.gulftalent.com/
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [direct_title, combination]
+    rate_limit_notes: "No public API; raw-HTML fetch only."
+    country_coverage: gulf
+    job_types: [Full-time, Contract]
+    reliability: medium
+    enabled: true
+
+  - name: Naukrigulf
+    type: job_board
+    url: https://www.naukrigulf.com/
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [direct_title]
+    rate_limit_notes: "No public API; raw-HTML fetch only."
+    country_coverage: gulf
+    job_types: [Full-time, Contract]
+    reliability: medium
+    enabled: true
+
+  - name: Glassdoor
+    type: job_board
+    url: https://www.glassdoor.com/
+    access_method: BROWSER_REQUIRED
+    api_available: false
+    requires_login: true
+    requires_browser: true
+    supported_search_types: [direct_title, company_discovery]
+    rate_limit_notes: "Partial content gated behind login/signup prompts."
+    country_coverage: global
+    job_types: [Full-time, Contract, Remote]
+    reliability: n/a
+    enabled: false
+
+  - name: Wellfound (AngelList Talent)
+    type: job_board
+    url: https://wellfound.com/
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [direct_title, remote]
+    rate_limit_notes: "No public API; raw-HTML fetch only."
+    country_coverage: global
+    job_types: [Full-time, Contract, Remote]
+    reliability: medium
+    enabled: true
+
+  - name: ArchDaily Jobs
+    type: job_board
+    url: https://www.archdaily.com/jobs
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [direct_title, combination]
+    rate_limit_notes: "No public API; raw-HTML fetch only."
+    country_coverage: global
+    job_types: [Full-time, Contract, On-site, Remote]
+    reliability: medium
+    enabled: true
+
+  - name: We Work Remotely
+    type: job_board
+    url: https://weworkremotely.com/
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [remote]
+    rate_limit_notes: "No public API; raw-HTML fetch only."
+    country_coverage: worldwide_remote
+    job_types: [Remote]
+    reliability: medium
+    enabled: true
 
 company_sources:
   - name: Official company career pages
-    access_type: searchable_source
-    notes: Discovered per-company via company_intelligence.py; URL stored per company record.
+    type: company_source
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [company_discovery]
+    rate_limit_notes: "Per-company; scripts/sources/company_careers.py fetches raw HTML only."
+    country_coverage: global
+    job_types: [all]
+    reliability: variable
+    enabled: true
   - name: Architecture firm websites
-    access_type: searchable_source
+    type: company_source
+    access_method: PUBLIC_WEB
+    requires_login: false
+    requires_browser: false
+    api_available: false
+    supported_search_types: [company_discovery]
+    country_coverage: global
+    job_types: [all]
+    reliability: variable
+    enabled: true
   - name: Engineering consultancy websites
-    access_type: searchable_source
+    type: company_source
+    access_method: PUBLIC_WEB
+    requires_login: false
+    requires_browser: false
+    api_available: false
+    supported_search_types: [company_discovery]
+    country_coverage: global
+    job_types: [all]
+    reliability: variable
+    enabled: true
   - name: BIM consultancy websites
-    access_type: searchable_source
+    type: company_source
+    access_method: PUBLIC_WEB
+    requires_login: false
+    requires_browser: false
+    api_available: false
+    supported_search_types: [company_discovery]
+    country_coverage: global
+    job_types: [all]
+    reliability: variable
+    enabled: true
   - name: Contractor / design-build company websites
-    access_type: searchable_source
+    type: company_source
+    access_method: PUBLIC_WEB
+    requires_login: false
+    requires_browser: false
+    api_available: false
+    supported_search_types: [company_discovery]
+    country_coverage: global
+    job_types: [all]
+    reliability: variable
+    enabled: true
   - name: Real estate developer websites
-    access_type: searchable_source
+    type: company_source
+    access_method: PUBLIC_WEB
+    requires_login: false
+    requires_browser: false
+    api_available: false
+    supported_search_types: [company_discovery, hidden_opportunity]
+    country_coverage: global
+    job_types: [all]
+    reliability: variable
+    enabled: true
   - name: Interior design studio websites
-    access_type: searchable_source
+    type: company_source
+    access_method: PUBLIC_WEB
+    requires_login: false
+    requires_browser: false
+    api_available: false
+    supported_search_types: [company_discovery]
+    country_coverage: global
+    job_types: [all]
+    reliability: variable
+    enabled: true
   - name: Visualization studio websites
-    access_type: searchable_source
-  - name: Landscape company websites
-    access_type: searchable_source
+    type: company_source
+    access_method: PUBLIC_WEB
+    requires_login: false
+    requires_browser: false
+    api_available: false
+    supported_search_types: [company_discovery]
+    country_coverage: global
+    job_types: [all]
+    reliability: variable
+    enabled: true
   - name: AEC recruitment firm websites
-    access_type: searchable_source
+    type: company_source
+    access_method: PUBLIC_WEB
+    requires_login: false
+    requires_browser: false
+    api_available: false
+    supported_search_types: [company_discovery]
+    country_coverage: global
+    job_types: [all]
+    reliability: variable
+    enabled: true
 
 freelance_sources:
   - name: Upwork
+    type: freelance_platform
     url: https://www.upwork.com/
-    access_type: requires_manual_or_browser_access
-    notes: Login-gated; proposals require an active, human-controlled account.
+    access_method: BROWSER_REQUIRED
+    api_available: false
+    requires_login: true
+    requires_browser: true
+    supported_search_types: [freelance]
+    rate_limit_notes: "Login-gated; proposals require an active, human-controlled account."
+    country_coverage: global
+    job_types: [Freelance, Contract, Project-based]
+    reliability: n/a
+    enabled: false
   - name: Contra
+    type: freelance_platform
     url: https://contra.com/
-    access_type: searchable_source
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [freelance]
+    rate_limit_notes: "No public API; raw-HTML fetch only."
+    country_coverage: global
+    job_types: [Freelance, Project-based]
+    reliability: medium
+    enabled: true
   - name: Fiverr
+    type: freelance_platform
     url: https://www.fiverr.com/
-    access_type: searchable_source
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [freelance]
+    rate_limit_notes: "No public API; raw-HTML fetch only."
+    country_coverage: global
+    job_types: [Freelance, Project-based]
+    reliability: medium
+    enabled: true
   - name: Freelancer.com
+    type: freelance_platform
     url: https://www.freelancer.com/
-    access_type: searchable_source
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [freelance]
+    rate_limit_notes: "No public API; raw-HTML fetch only."
+    country_coverage: global
+    job_types: [Freelance, Contract, Project-based]
+    reliability: medium
+    enabled: true
   - name: PeoplePerHour
+    type: freelance_platform
     url: https://www.peopleperhour.com/
-    access_type: searchable_source
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [freelance]
+    rate_limit_notes: "No public API; raw-HTML fetch only."
+    country_coverage: global
+    job_types: [Freelance, Project-based]
+    reliability: medium
+    enabled: true
 
 professional_community_sources:
   - name: Reddit r/Revit
+    type: community
     url: https://www.reddit.com/r/Revit/
-    access_type: searchable_source
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [keyword, hidden_opportunity]
+    country_coverage: global
+    job_types: [all]
+    reliability: low
+    enabled: true
   - name: Reddit r/architecture
+    type: community
     url: https://www.reddit.com/r/architecture/
-    access_type: searchable_source
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [keyword, hidden_opportunity]
+    country_coverage: global
+    job_types: [all]
+    reliability: low
+    enabled: true
   - name: AUGI (Revit/AutoCAD forums)
+    type: community
     url: https://www.augi.com/
-    access_type: searchable_source
+    access_method: PUBLIC_WEB
+    api_available: false
+    requires_login: false
+    requires_browser: false
+    supported_search_types: [keyword]
+    country_coverage: global
+    job_types: [all]
+    reliability: low
+    enabled: true

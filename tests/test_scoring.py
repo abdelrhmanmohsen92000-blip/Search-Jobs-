@@ -42,6 +42,22 @@ def test_recommendation_bands(score, expected):
     assert scoring.recommendation_for_score(score) == expected
 
 
+def test_action_apply_now_for_high_score():
+    assert scoring.action_for_result(90, {"eligibility": 9}) == "APPLY_NOW"
+
+
+def test_action_network_first_when_eligibility_is_weak():
+    assert scoring.action_for_result(60, {"eligibility": 2}) == "NETWORK_FIRST"
+
+
+def test_action_consider_when_eligibility_is_fine():
+    assert scoring.action_for_result(60, {"eligibility": 8}) == "CONSIDER"
+
+
+def test_action_skip_for_very_low_score():
+    assert scoring.action_for_result(10, {"eligibility": 5}) == "SKIP"
+
+
 def test_skill_gap_matches_and_misses():
     profile = {
         "skills": ["BIM Coordination", "Facade Design"],
@@ -66,6 +82,11 @@ def test_score_opportunity_record_full_shape():
     sub_scores = {k: 8 for k in scoring.WEIGHTS}
     profile = {"skills": ["BIM Coordination"], "software": [{"name": "Autodesk Revit"}]}
     result = scoring.score_opportunity_record(opportunity, sub_scores, profile=profile)
-    assert set(result) == {"score", "priority", "recommendation", "matched_skills", "missing_skills", "strengths", "risks"}
+    expected_keys = {
+        "score", "priority", "recommendation", "action", "technical", "experience", "software",
+        "project", "location", "eligibility", "career_value", "compensation",
+        "matched_skills", "missing_skills", "strengths", "risks",
+    }
+    assert set(result) == expected_keys
     assert result["score"] == 80.0
     assert result["missing_skills"] == []

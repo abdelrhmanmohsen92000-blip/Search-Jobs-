@@ -1,1 +1,1 @@
-date_applied,job_title,company,country,score,application_channel,status,interview_date,interview_stage,outcome,lessons_learned
+opportunity_id,company,job_title,country,source,url,score,cv_version,portfolio_version,application_date,status,contact_person,linkedin,email,follow_up_date,interview_date,result,reason,notes

@@ -62,6 +62,24 @@ def recommendation_for_score(score):
     return _band(score, RECOMMENDATION_BANDS)
 
 
+def action_for_result(score, sub_scores):
+    """ACTION: a concrete next step, distinct from `recommendation` in that it
+    also reacts to eligibility — a decent-scoring opportunity with poor
+    eligibility (visa/work authorization uncertain) should be networked into
+    rather than applied to cold.
+    """
+    eligibility = sub_scores.get("eligibility", 5)
+    if score >= 85:
+        return "APPLY_NOW"
+    if score >= 70:
+        return "APPLY"
+    if score >= 50:
+        return "NETWORK_FIRST" if eligibility < 5 else "CONSIDER"
+    if score >= 25:
+        return "LOW_PRIORITY"
+    return "SKIP"
+
+
 def compute_weighted_score(sub_scores):
     """sub_scores: dict with the 8 WEIGHTS keys, each 0-10. Returns 0-100 float."""
     missing = set(WEIGHTS) - set(sub_scores)
@@ -153,6 +171,15 @@ def score_opportunity_record(opportunity, sub_scores, profile=None):
         "score": score,
         "priority": priority_for_score(score),
         "recommendation": recommendation_for_score(score),
+        "action": action_for_result(score, sub_scores),
+        "technical": sub_scores.get("technical"),
+        "experience": sub_scores.get("experience"),
+        "software": sub_scores.get("software"),
+        "project": sub_scores.get("project"),
+        "location": sub_scores.get("location"),
+        "eligibility": sub_scores.get("eligibility"),
+        "career_value": sub_scores.get("career_value"),
+        "compensation": sub_scores.get("compensation"),
         "matched_skills": matched,
         "missing_skills": missing,
         "strengths": strengths,
