@@ -9,6 +9,11 @@ search, freelance discovery, company targeting, and professional networking.
   and Remotive make genuine HTTP calls), a source-health-aware pipeline that never fails
   completely because one source is down, global/regional/remote/freelance query generation, and
   richer company/networking/application intelligence wired into one daily cycle.
+- **V1.3** adds the **Web Intelligence Layer**: turning real web-search results (collected by a
+  human or a browser-capable session) into structured, scored opportunities — source routing,
+  HTML extraction, rule-based job/freelance/company-signal classification, provenance,
+  confidence scoring, stale-opportunity detection, source-preserving deduplication, and company
+  entity resolution. See "Web Intelligence Layer" below.
 
 Every file from V1.0/V1.1 (profile, templates, docs, CSVs) is preserved.
 
@@ -47,6 +52,15 @@ scripts/
   daily_research.py            Orchestrates the full live pipeline (see below) -> reports/daily_report.md
   weekly_analysis.py           Rolls up tracking/*.csv into reports/weekly_report.md + reports/weekly_strategy.md
   score_opportunity.py         Thin CLI wrapper around lib/scoring.py (kept for backward compatibility)
+  web_research.py              V1.3 Web Intelligence Layer orchestrator (web-import pipeline) -> tracking/jobs.csv, reports
+  web/                         Web Intelligence Layer (V1.3) — see "Web Intelligence Layer" below
+    base.py                     SearchResult / SearchProviderResult / WebSearchProvider / PageExtractionResult types
+    source_router.py             Identifies a source from a URL/domain (LinkedIn, Indeed, ..., Company Career Page, Unknown)
+    page_extractor.py            Stdlib-only HTML -> title/headings/links/job-fields extraction; JS_REQUIRED detection
+    opportunity_extractor.py     Search result/page -> candidate opportunity + OPEN_VACANCY/FREELANCE_PROJECT/COMPANY_SIGNAL/IRRELEVANT classifier
+    manual_search_import.py      Reads data/raw/search_results/*.json; also a WebSearchProvider implementation
+    search_engine.py              Ties query plan to a WebSearchProvider; reports SEARCH_PROVIDER_UNAVAILABLE honestly
+    browser_queue.py              Generates reports/browser_search_queue.md for BROWSER_REQUIRED/PUBLIC_WEB sources
 
 profile/profile.md            Human-readable profile (source of truth for the person; keep in sync with config/profile_skills.yaml)
 docs/                         Strategy, scoring, and decision-maker policy documents (prose explanations of the engine)
@@ -54,9 +68,10 @@ templates/                    Manual research templates (job/company/contact/out
 tracking/                     CSV trackers: jobs, companies, contacts, networking, applications
 data/
   raw/                         Drop collected opportunity JSON batches here (Manual Import adapter reads *.json at the top level)
+  raw/search_results/           V1.3: drop web-search-result JSON batches here for `web-import` (see "Manual search import")
   processed/                   Timestamped JSON snapshots of every normalized+scored run, and of application plans
   archive/                     Automatic timestamped backups of any tracking CSV before it's overwritten
-reports/                      Generated: daily_report.md, weekly_report.md, weekly_strategy.md, networking_queue.md
+reports/                      Generated: daily_report.md, weekly_report.md, weekly_strategy.md, networking_queue.md, browser_search_queue.md
 tests/                        pytest suite: scoring, dedup, normalization, priority, malformed/missing data, sources, pipeline, applications
 ```
 
@@ -238,6 +253,106 @@ at RESEARCH → IDENTIFY → SCORE → PREPARE → ASK HUMAN TO ACT → TRACK RE
 `templates/outreach-message.md`. Every LinkedIn connection request and message is reviewed and
 sent manually by Abdelrhman; only the outcome is tracked back into `tracking/networking.csv`.
 
+## Web Intelligence Layer (V1.3)
+
+Converts real web-search results into structured, scored opportunities:
+
+```
+WEB SEARCH -> SEARCH RESULT COLLECTION -> RESULT EXTRACTION -> SOURCE IDENTIFICATION ->
+CONTENT EXTRACTION -> OPPORTUNITY EXTRACTION -> NORMALIZATION -> DEDUPLICATION -> SCORING ->
+COMPANY INTELLIGENCE -> NETWORKING -> APPLICATION INTELLIGENCE -> REPORT
+```
+
+It reuses the existing scoring/normalization/storage/reporting architecture (`scripts/lib/*`,
+`company_intelligence.py`) rather than duplicating it — `scripts/web_research.py` is the thin
+orchestrator that wires the two together.
+
+**Search providers** (`scripts/web/base.py: WebSearchProvider`): a generic `search(query, limit)`
+interface so the system never hardcodes one provider. Only `ManualSearchImportProvider`
+(`scripts/web/manual_search_import.py`) is wired up today — it reads human/browser-collected
+batches from `data/raw/search_results/*.json`:
+```json
+[
+  {"title": "BIM Architect", "url": "https://example.com/job/123",
+   "snippet": "Looking for a BIM Architect with Revit experience...",
+   "source": "search_engine", "query": "BIM Architect Revit Germany", "region": "europe"}
+]
+```
+No missing field is ever invented — absent values stay `null`/empty exactly as in the input.
+
+**Source routing** (`scripts/web/source_router.py`): identifies LinkedIn, Indeed, Bayt,
+GulfTalent, Naukrigulf, Glassdoor, Wellfound, Remote OK, Remotive, We Work Remotely, Contra,
+Upwork, Freelancer, PeoplePerHour, Fiverr, a generic Company Career Page, or `Unknown` from a
+URL/domain, with `requires_browser` and a `confidence` that is `1.0` for a known domain, a
+heuristic `0.5` for a plausible careers-page guess, and `0.0` for anything unrecognized — never
+asserted as a known source without evidence.
+
+**Page extraction** (`scripts/web/page_extractor.py`): stdlib-only HTML parsing (no JS
+rendering) for title, visible text, headings, links, and best-effort job-posting fields
+(company — only from structured markup, never guessed from free text at the page level —
+job title, location, employment type, remote, salary, skills, application URL). A page that
+looks JS-rendered (SPA shell, near-empty body) reports `PAGE_STATUS = JS_REQUIRED` instead of
+extracting nothing and pretending it's complete.
+
+**Opportunity extraction & classification** (`scripts/web/opportunity_extractor.py`): converts a
+search result (+ optional page extraction) into a candidate matching
+`schemas/opportunity.schema.json`, and classifies it `OPEN_VACANCY` / `FREELANCE_PROJECT` /
+`COMPANY_SIGNAL` / `IRRELEVANT` with a rule-based (no external AI dependency) classifier. A
+company name is only filled in when a specific textual pattern supports it ("X is hiring",
+"join X", page markup) — otherwise it's left empty and the record is rejected downstream with a
+reason, never fabricated. `COMPANY_SIGNAL` results never become a job opportunity — they route
+into `company_intelligence.py` as a `HIDDEN_OPPORTUNITY` candidate instead (same classification
+rules as V1.2, now fed by web signals too).
+
+**Provenance & confidence** (schema fields `provenance` / `confidence_score`): every web-derived
+opportunity carries `{source, source_url, search_query, retrieved_at, extraction_method,
+confidence}` — we always know where a job came from. `confidence_score` (0–100, extraction/source
+reliability) is deliberately separate from `match_score` (fit to the candidate's profile):
+`Match Score: 91, Confidence: 72` means "excellent fit, but the extraction isn't perfectly
+reliable" — never conflated into one number.
+
+**Stale detection** (`scripts/lib/staleness.py`): `lifecycle_status` ∈ `NEW / ACTIVE / STALE /
+CLOSED / UNCERTAIN`, driven by posting age (configurable thresholds) and explicit closure
+evidence in the text. `CLOSED` is never inferred from age alone — only from an actual "position
+filled"/"no longer accepting" style marker; a record with no date at all is `UNCERTAIN`, not
+guessed as fresh.
+
+**Duplicate intelligence** (`scripts/lib/dedup.merge_duplicates`): the same posting found via
+LinkedIn, Indeed, and a company careers page merges into one canonical record with an
+`alternate_sources` list — source information is preserved, never dropped, on every merge.
+
+**Company entity resolution** (`scripts/lib/entity_resolution.py`): "Al Futtaim" / "Al-Futtaim" /
+"Al Futtaim Group" resolve to one canonical name via exact match on a normalized key (lowercased,
+punctuation stripped, common corporate suffixes removed) — deliberately not a fuzzy-ratio match,
+so two genuinely different companies are never merged on a "looks similar" guess.
+
+### Web Intelligence CLI
+
+```bash
+python career_hunter.py web-search --region global          # generates plan + browser queue, reports SEARCH_PROVIDER_UNAVAILABLE honestly
+python career_hunter.py web-search --region europe
+python career_hunter.py web-search --region gulf
+python career_hunter.py web-search --remote
+python career_hunter.py web-search --freelance
+python career_hunter.py web-search --region global --dry-run   # plan + coverage only, touches nothing
+
+python career_hunter.py browser-queue --region global          # writes reports/browser_search_queue.md
+
+python career_hunter.py web-import --file data/raw/search_results/linkedin.json
+python career_hunter.py web-import --directory data/raw/search_results/
+python career_hunter.py web-import --directory data/raw/search_results/ --dry-run
+```
+
+`web-search` never pretends to have searched: with no live search API or browser-automation
+session configured (the case in this environment, and by design for BROWSER_REQUIRED sources),
+it generates the query plan, writes `reports/browser_search_queue.md`, and reports
+`provider_status: SEARCH_PROVIDER_UNAVAILABLE` in its output. `browser-queue` lists each manual
+search a human should run (source, query, region, priority, expected value, and exactly what to
+do with the results), prioritized by job-title value (BIM Architect/Coordinator/Revit Architect
+highest). `web-import` loads, validates, normalizes, extracts, deduplicates (with source
+merging), scores, saves to `tracking/jobs.csv`, and routes `COMPANY_SIGNAL` results into
+`tracking/companies.csv` as `HIDDEN_OPPORTUNITY` candidates.
+
 ## Limitations (stated plainly, not glossed over)
 
 - This sandboxed environment's egress policy blocks the two live API hosts (Remote OK, Remotive)
@@ -250,6 +365,15 @@ sent manually by Abdelrhman; only the outcome is tracked back into `tracking/net
 - BROWSER_REQUIRED sources are never touched programmatically, by design, not by capability gap.
 - `rank_regions()` needs logged `tracking/jobs.csv` data to actually rank; with none yet, regions
   are returned in config order (not a ranking, just a stable default) — see `search_config.py`.
+- No live web-search API or browser-automation provider is wired up in V1.3 — `web-search`
+  always reports `SEARCH_PROVIDER_UNAVAILABLE` here. Real results enter via `web-import` from
+  `data/raw/search_results/*.json`, collected by a human (or a separate browser-capable agent
+  session) running the queries in `reports/browser_search_queue.md`.
+- `page_extractor.py` cannot reliably extract a company name from free-form visible text (too
+  error-prone / too easy to fabricate) — company extraction from a page needs structured markup
+  (JSON-LD/microdata), which V1.3 doesn't parse yet. From a bare search snippet, company is only
+  filled in when a specific pattern ("X is hiring", "join X") supports it; otherwise the record
+  is correctly rejected downstream rather than guessed.
 
 ## Tests
 
@@ -265,3 +389,14 @@ discarded or crashed on), and the V1.2 live-research layer: source-adapter succe
 malformed-response handling (via monkeypatched HTTP, so tests never depend on network access),
 global/regional/remote/freelance query generation, source-health recording, and dry-run behavior
 (touches no trackers, produces no fake data).
+
+V1.3 adds coverage for the Web Intelligence Layer: the search-provider interface and
+`SEARCH_PROVIDER_UNAVAILABLE` reporting, manual search import (valid/malformed/empty), source
+routing (known domains, unknown domains never assumed known, careers-page heuristic), HTML
+extraction (titles/headings/skills, JS-required detection, empty/malformed HTML), opportunity
+extraction and all four classifications (including that company is never fabricated without
+textual support), the browser queue (includes BROWSER_REQUIRED sources even when `enabled:
+false`, priority sorting), provenance/confidence population, stale-opportunity detection
+(including that CLOSED is never inferred from age alone), source-preserving duplicate merging,
+and company entity resolution (merges confident variants, never merges different companies).
+122/122 tests passing as of V1.3.

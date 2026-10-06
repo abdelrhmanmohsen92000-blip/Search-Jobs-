@@ -45,7 +45,46 @@
       "default": "new"
     },
     "reason": { "type": ["string", "null"], "description": "Human/engine-readable justification for the score and priority." },
-    "risk_flags": { "type": "array", "items": { "type": "string" }, "default": [] }
+    "risk_flags": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "provenance": {
+      "type": ["object", "null"],
+      "description": "V1.3 web intelligence layer: where this record came from. Separate from match_score.",
+      "properties": {
+        "source": { "type": ["string", "null"] },
+        "source_url": { "type": ["string", "null"] },
+        "search_query": { "type": ["string", "null"] },
+        "retrieved_at": { "type": ["string", "null"] },
+        "extraction_method": { "type": ["string", "null"] },
+        "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "confidence_score": {
+      "type": ["number", "null"], "minimum": 0, "maximum": 100,
+      "description": "Extraction/source reliability (0-100) — NOT the opportunity match_score."
+    },
+    "lifecycle_status": {
+      "type": ["string", "null"],
+      "enum": ["NEW", "ACTIVE", "STALE", "CLOSED", "UNCERTAIN", null],
+      "description": "Posting freshness, distinct from the application-pipeline `status` field."
+    },
+    "alternate_sources": {
+      "type": "array",
+      "description": "Other sources/URLs found to point at the same underlying opportunity (duplicate intelligence, Phase 23).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source": { "type": ["string", "null"] },
+          "source_url": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "company_canonical": {
+      "type": ["string", "null"],
+      "description": "Resolved canonical company name when entity resolution is confident (Phase 24); null when not attempted or uncertain."
+    }
   },
   "additionalProperties": false
 }

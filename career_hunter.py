@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AI Career Hunter — CLI entrypoint (V1.2).
+"""AI Career Hunter — CLI entrypoint (V1.3).
 
 Commands:
     search       [--region <key>|global] [--remote] [--freelance] [--source <name>] [--limit N] [--dry-run]
@@ -10,6 +10,9 @@ Commands:
     daily        [--region ...] [--remote] [--freelance] [--source <name>] [--limit N] [--dry-run]
     weekly
     report       alias for `daily` followed by `weekly`
+    web-search   [--region <key>|global] [--remote] [--freelance] [--dry-run]   (Web Intelligence Layer)
+    browser-queue [--region <key>|global] [--remote] [--freelance]
+    web-import   --file <path> | --directory <path> [--dry-run]
 
 Examples:
     python career_hunter.py search --region global
@@ -22,13 +25,19 @@ Examples:
     python career_hunter.py daily --region global
     python career_hunter.py daily --region global --dry-run
     python career_hunter.py weekly
+    python career_hunter.py web-search --region global --dry-run
+    python career_hunter.py browser-queue --region global
+    python career_hunter.py web-import --file data/raw/search_results/linkedin.json
+    python career_hunter.py web-import --directory data/raw/search_results/
 """
 import argparse
 import json
 
 from scripts import company_intelligence, networking_intelligence  # noqa: F401
-from scripts import daily_research, search_config, weekly_analysis
+from scripts import daily_research, search_config, weekly_analysis, web_research
 from scripts.lib import paths, storage
+from scripts.web import browser_queue as browser_queue_lib
+from scripts.web import search_engine as search_engine_lib
 
 
 def cmd_search(args):
@@ -138,6 +147,59 @@ def cmd_report(args):
     cmd_weekly(args)
 
 
+def cmd_web_search(args):
+    """Web Intelligence Layer: generate the search plan; since no live search
+    API or browser-automation session is configured in this environment,
+    this NEVER pretends to have searched — it reports SEARCH_PROVIDER_UNAVAILABLE
+    and (unless --dry-run) writes the browser queue so a human can run the
+    searches manually and feed results back via `web-import`.
+    """
+    plan = search_config.build_query_plan(region=args.region, remote_only=args.remote, freelance_only=args.freelance)
+    summary = search_config.summarize_plan(plan)
+
+    if args.dry_run:
+        print(json.dumps({
+            "dry_run": True,
+            "search_plan_queries": summary["total_queries"],
+            "geographic_coverage": summary["region_rank_order"],
+            "provider_status": "SEARCH_PROVIDER_UNAVAILABLE",
+            "note": "No search API or browser session configured in this environment. "
+                    "No trackers, reports, or opportunity data were touched.",
+        }, indent=2))
+        return
+
+    results = search_engine_lib.run_web_search(plan[:1] or [None], provider=None)
+    tasks = browser_queue_lib.build_browser_queue(region=args.region, remote_only=args.remote, freelance_only=args.freelance)
+    queue_path = browser_queue_lib.generate_browser_queue_report(tasks)
+
+    print(json.dumps({
+        "provider_status": results[0].status,
+        "error": results[0].error,
+        "search_plan_queries": summary["total_queries"],
+        "browser_queue_tasks": len(tasks),
+        "browser_queue_report": str(queue_path),
+        "next_step": "Run the queries in reports/browser_search_queue.md manually, export results to "
+                     "data/raw/search_results/, then run `python career_hunter.py web-import --directory "
+                     "data/raw/search_results/`.",
+    }, indent=2))
+
+
+def cmd_browser_queue(args):
+    tasks = browser_queue_lib.build_browser_queue(region=args.region, remote_only=args.remote, freelance_only=args.freelance)
+    out = browser_queue_lib.generate_browser_queue_report(tasks)
+    print(f"Browser search queue written to {out} ({len(tasks)} tasks)")
+
+
+def cmd_web_import(args):
+    from pathlib import Path
+    directory = Path(args.directory) if args.directory else None
+    result = web_research.run_web_import(directory=directory, file_path=args.file, dry_run=args.dry_run)
+    if result["dry_run"]:
+        print(json.dumps(result, indent=2, default=str))
+    else:
+        print(json.dumps(result["stats"], indent=2, default=str))
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="career_hunter.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -188,6 +250,21 @@ def build_parser():
     add_region_flags(p_report)
     p_report.add_argument("--dry-run", action="store_true")
     p_report.set_defaults(func=cmd_report)
+
+    p_web_search = sub.add_parser("web-search", help="Web Intelligence Layer: generate search plan + browser queue (no live provider)")
+    add_region_flags(p_web_search)
+    p_web_search.add_argument("--dry-run", action="store_true")
+    p_web_search.set_defaults(func=cmd_web_search)
+
+    p_browser_queue = sub.add_parser("browser-queue", help="Generate reports/browser_search_queue.md")
+    add_region_flags(p_browser_queue)
+    p_browser_queue.set_defaults(func=cmd_browser_queue)
+
+    p_web_import = sub.add_parser("web-import", help="Import search results from data/raw/search_results/")
+    p_web_import.add_argument("--file", default=None, help="A single search-results JSON file")
+    p_web_import.add_argument("--directory", default=None, help="A directory of search-results JSON files")
+    p_web_import.add_argument("--dry-run", action="store_true")
+    p_web_import.set_defaults(func=cmd_web_import)
 
     return parser
 

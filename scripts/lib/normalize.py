@@ -82,6 +82,11 @@ def normalize_opportunity(raw):
         "status": raw.get("status") or "new",
         "reason": raw.get("reason"),
         "risk_flags": _list_or_empty(raw.get("risk_flags")),
+        "provenance": raw.get("provenance"),
+        "confidence_score": raw.get("confidence_score"),
+        "lifecycle_status": raw.get("lifecycle_status"),
+        "alternate_sources": raw.get("alternate_sources") or [],
+        "company_canonical": raw.get("company_canonical"),
     }
 
     if "_sub_scores" in raw:
