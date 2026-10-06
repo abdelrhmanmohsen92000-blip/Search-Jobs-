@@ -157,7 +157,8 @@ def run_web_import(directory=None, file_path=None, dry_run=False):
     scored, dropped_count = score_and_finalize(candidates, profile=profile)
 
     save_to_jobs_csv(scored)
-    storage.save_run_snapshot("processed", "web_import_opportunities", scored)
+    if scored:
+        storage.save_run_snapshot("processed", "web_import_opportunities", scored)
 
     companies_added = []
     for signal in hidden_signals:

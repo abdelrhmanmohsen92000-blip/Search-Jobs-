@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AI Career Hunter — CLI entrypoint (V1.3).
+"""AI Career Hunter — CLI entrypoint (V1.4).
 
 Commands:
     search       [--region <key>|global] [--remote] [--freelance] [--source <name>] [--limit N] [--dry-run]
@@ -13,6 +13,13 @@ Commands:
     web-search   [--region <key>|global] [--remote] [--freelance] [--dry-run]   (Web Intelligence Layer)
     browser-queue [--region <key>|global] [--remote] [--freelance]
     web-import   --file <path> | --directory <path> [--dry-run]
+    analyze      [--score-min N] [--deep]          (AI job analysis + decisions, no report/alerts write)
+    decision     [--score-min N]                    (decision engine only, prints decisions)
+    strategy                                         (career strategy report)
+    learning                                         (response/interview/offer rates by segment, with sample sizes)
+    market                                           (market intelligence: demand signals with sample size)
+    alerts                                           (generate reports/alerts.md from current tracking data)
+    intelligence [--score-min N] [--deep]           (full pipeline: LOAD->ANALYZE->DECIDE->NETWORK->APPLY->REPORT->LEARN)
 
 Examples:
     python career_hunter.py search --region global
@@ -29,12 +36,24 @@ Examples:
     python career_hunter.py browser-queue --region global
     python career_hunter.py web-import --file data/raw/search_results/linkedin.json
     python career_hunter.py web-import --directory data/raw/search_results/
+    python career_hunter.py analyze --score-min 70
+    python career_hunter.py analyze --score-min 85 --deep
+    python career_hunter.py decision
+    python career_hunter.py learning
+    python career_hunter.py market
+    python career_hunter.py intelligence --score-min 70
+
+V1.4 never sends emails, never sends LinkedIn messages, never applies
+automatically, and never automates browser actions — human approval remains
+mandatory for every outward action (see README "LinkedIn / human-approval policy").
 """
 import argparse
 import json
 
 from scripts import company_intelligence, networking_intelligence  # noqa: F401
-from scripts import daily_research, search_config, weekly_analysis, web_research
+from scripts import career_intelligence, daily_research, search_config, weekly_analysis, web_research
+from scripts.intelligence import career_strategy as career_strategy_lib
+from scripts.intelligence import learning_engine as learning_engine_lib
 from scripts.lib import paths, storage
 from scripts.web import browser_queue as browser_queue_lib
 from scripts.web import search_engine as search_engine_lib
@@ -200,6 +219,63 @@ def cmd_web_import(args):
         print(json.dumps(result["stats"], indent=2, default=str))
 
 
+def _print_enriched_summary(enriched, label="Analyzed"):
+    print(f"{label} {len(enriched)} opportunities.")
+    for o in enriched[:10]:
+        d = o["decision"]
+        print(f"  [{o['action_priority']:.1f}] {d['decision']:16s} {o.get('job_title')} @ {o.get('company')} "
+              f"(match={o.get('match_score')}, ai={o['job_analysis']['ai_opportunity_score']})")
+
+
+def cmd_analyze(args):
+    enriched = career_intelligence.analyze_opportunities(score_min=args.score_min, deep=args.deep)
+    _print_enriched_summary(enriched)
+
+
+def cmd_decision(args):
+    enriched = career_intelligence.analyze_opportunities(score_min=args.score_min)
+    career_intelligence.record_decisions(enriched)
+    for o in enriched:
+        d = o["decision"]
+        print(json.dumps({
+            "company": o.get("company"), "job_title": o.get("job_title"), "decision": d["decision"],
+            "why": d["why"], "risks": d["risks"], "next_action": d["next_action"],
+            "action_priority": o["action_priority"],
+        }, indent=2))
+
+
+def cmd_strategy(args):
+    report = career_strategy_lib.career_strategy_report()
+    print(json.dumps(report, indent=2, default=str))
+
+
+def cmd_learning(args):
+    report = learning_engine_lib.full_learning_report()
+    print(json.dumps(report, indent=2, default=str))
+
+
+def cmd_market(args):
+    report = career_strategy_lib.market_intelligence()
+    print(json.dumps(report, indent=2, default=str))
+
+
+def cmd_alerts(args):
+    enriched = career_intelligence.analyze_opportunities()
+    alerts = career_intelligence.generate_alerts(enriched)
+    out = career_intelligence.generate_alerts_report(alerts)
+    print(f"Alerts report written to {out} ({len(alerts)} alert(s)).")
+
+
+def cmd_intelligence(args):
+    """Full pipeline: LOAD -> ANALYZE -> SCORE -> DECIDE -> NETWORK -> APPLICATION STRATEGY -> REPORT -> LEARN.
+    Never sends anything, never applies anything, never automates LinkedIn/browser actions.
+    """
+    result = career_intelligence.run_intelligence_cycle(score_min=args.score_min, deep=args.deep)
+    _print_enriched_summary(result["enriched"], label="Intelligence cycle analyzed")
+    print(f"Report: {result['report_path']}")
+    print(f"Alerts: {len(result['alerts'])} (see reports/alerts.md)")
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="career_hunter.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -265,6 +341,32 @@ def build_parser():
     p_web_import.add_argument("--directory", default=None, help="A directory of search-results JSON files")
     p_web_import.add_argument("--dry-run", action="store_true")
     p_web_import.set_defaults(func=cmd_web_import)
+
+    p_analyze = sub.add_parser("analyze", help="AI job analysis + decisions (V1.4)")
+    p_analyze.add_argument("--score-min", type=float, default=0)
+    p_analyze.add_argument("--deep", action="store_true")
+    p_analyze.set_defaults(func=cmd_analyze)
+
+    p_decision = sub.add_parser("decision", help="Decision engine only; records to tracking/decisions.csv")
+    p_decision.add_argument("--score-min", type=float, default=0)
+    p_decision.set_defaults(func=cmd_decision)
+
+    p_strategy = sub.add_parser("strategy", help="Career strategy report (best countries/titles/companies/sources)")
+    p_strategy.set_defaults(func=cmd_strategy)
+
+    p_learning = sub.add_parser("learning", help="Response/interview/offer rates by segment, with sample sizes")
+    p_learning.set_defaults(func=cmd_learning)
+
+    p_market = sub.add_parser("market", help="Market intelligence: demand signals with sample size")
+    p_market.set_defaults(func=cmd_market)
+
+    p_alerts = sub.add_parser("alerts", help="Generate reports/alerts.md from current tracking data")
+    p_alerts.set_defaults(func=cmd_alerts)
+
+    p_intelligence = sub.add_parser("intelligence", help="Full V1.4 pipeline: LOAD->ANALYZE->DECIDE->NETWORK->APPLY->REPORT->LEARN")
+    p_intelligence.add_argument("--score-min", type=float, default=0)
+    p_intelligence.add_argument("--deep", action="store_true")
+    p_intelligence.set_defaults(func=cmd_intelligence)
 
     return parser
 

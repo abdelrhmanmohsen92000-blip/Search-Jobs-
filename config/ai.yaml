@@ -1,0 +1,42 @@
+# AI provider configuration (V1.4).
+#
+# The repository MUST remain fully runnable and testable without any API
+# key — the default provider is rule_based, a deterministic, local
+# heuristic engine (scripts/intelligence/ai_provider.py:RuleBasedAIProvider).
+# No API key is read from or stored in this repository; a future external
+# provider reads its key from an environment variable at call time only
+# (never written here, never logged, never committed).
+
+provider: rule_based
+
+tiers:
+  # See docs/scoring-model.md "AI cost control". Scores are the V1.1
+  # match_score (0-100). Tier 1 (rule-based only) applies below tier_2_min.
+  tier_2_min: 70   # AI analysis (job_analyzer) runs
+  tier_3_min: 85   # deep analysis (full risk/quality breakdown) runs
+  tier_4_min: 90   # full application strategy auto-generated, marked HIGH-VALUE
+
+providers:
+  rule_based:
+    description: "Deterministic local heuristics. No network calls, no API key. Always available."
+    requires_api_key: false
+
+  openai:
+    description: "Placeholder — not implemented. Would read OPENAI_API_KEY from the environment at call time."
+    requires_api_key: true
+    api_key_env_var: OPENAI_API_KEY
+    model: gpt-4o-mini
+    implemented: false
+
+  claude:
+    description: "Placeholder — not implemented. Would read ANTHROPIC_API_KEY from the environment at call time."
+    requires_api_key: true
+    api_key_env_var: ANTHROPIC_API_KEY
+    model: claude-sonnet-5
+    implemented: false
+
+  local_llm:
+    description: "Placeholder — not implemented. Would call a local inference server (e.g. Ollama) over HTTP."
+    requires_api_key: false
+    base_url_env_var: LOCAL_LLM_BASE_URL
+    implemented: false

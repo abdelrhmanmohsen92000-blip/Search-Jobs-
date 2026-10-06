@@ -14,6 +14,14 @@ search, freelance discovery, company targeting, and professional networking.
   HTML extraction, rule-based job/freelance/company-signal classification, provenance,
   confidence scoring, stale-opportunity detection, source-preserving deduplication, and company
   entity resolution. See "Web Intelligence Layer" below.
+- **V1.4** adds the **AI Intelligence Engine** — the final layer, turning the pipeline into a
+  practical decision tool: a provider-agnostic AI interface (rule-based by default, no API key
+  required), job fit/quality/risk analysis kept separate from the V1.1 `match_score`, a decision
+  engine (APPLY_NOW/APPLY/NETWORK_FIRST/RESEARCH_COMPANY/CONSIDER/LOW_PRIORITY/SKIP, always with a
+  reason), skill-gap and learning-priority analysis, company grading (A+ to D), a CV change plan,
+  tiered AI cost control, alerts, and decision history. See "AI Intelligence Engine" below. After
+  V1.4, version numbers stop incrementing for routine work — only a genuine architectural change
+  gets a new number.
 
 Every file from V1.0/V1.1 (profile, templates, docs, CSVs) is preserved.
 
@@ -61,18 +69,32 @@ scripts/
     manual_search_import.py      Reads data/raw/search_results/*.json; also a WebSearchProvider implementation
     search_engine.py              Ties query plan to a WebSearchProvider; reports SEARCH_PROVIDER_UNAVAILABLE honestly
     browser_queue.py              Generates reports/browser_search_queue.md for BROWSER_REQUIRED/PUBLIC_WEB sources
+  career_intelligence.py       V1.4 full pipeline orchestrator: LOAD->ANALYZE->DECIDE->NETWORK->APPLY->REPORT->LEARN
+  intelligence/                 AI Intelligence Engine (V1.4) — see "AI Intelligence Engine" below
+    ai_provider.py               AIProvider interface; RuleBasedAIProvider (default, no API key); tier_for_score() cost control
+    job_analyzer.py               fit_score / quality_score / risk_score / ai_opportunity_score — separate from match_score
+    skill_gap.py                   MATCH/PARTIAL_MATCH/MISSING/UNKNOWN classification + frequency-backed learning priority
+    decision_engine.py             APPLY_NOW/APPLY/NETWORK_FIRST/RESEARCH_COMPANY/CONSIDER/LOW_PRIORITY/SKIP + why/risks/next_action + action_priority
+    company_analyzer.py            COMPANY_PRIORITY (A+ to D) + honestly-UNKNOWN-gapped company analysis
+    cv_strategy.py                  CV_CHANGE_PLAN (headline/skills/experience/projects/portfolio) — never rewrites or invents
+    application_strategy.py         Wraps application_intelligence.py; HIGH-VALUE flag (score>=90); portfolio_recommendation()
+    career_strategy.py              Best countries/titles/companies/sources/work-modes + market_intelligence() (sample-sized)
+    learning_engine.py              Response/interview/offer/networking rates by segment, always with sample_size
 
 profile/profile.md            Human-readable profile (source of truth for the person; keep in sync with config/profile_skills.yaml)
 docs/                         Strategy, scoring, and decision-maker policy documents (prose explanations of the engine)
 templates/                    Manual research templates (job/company/contact/outreach) for when a human fills in detail
-tracking/                     CSV trackers: jobs, companies, contacts, networking, applications
+tracking/                     CSV trackers: jobs, companies, contacts, networking, applications, decisions, skill_gaps, learning, alerts
 data/
   raw/                         Drop collected opportunity JSON batches here (Manual Import adapter reads *.json at the top level)
   raw/search_results/           V1.3: drop web-search-result JSON batches here for `web-import` (see "Manual search import")
   processed/                   Timestamped JSON snapshots of every normalized+scored run, and of application plans
   archive/                     Automatic timestamped backups of any tracking CSV before it's overwritten
-reports/                      Generated: daily_report.md, weekly_report.md, weekly_strategy.md, networking_queue.md, browser_search_queue.md
-tests/                        pytest suite: scoring, dedup, normalization, priority, malformed/missing data, sources, pipeline, applications
+  alerts/                       V1.4: timestamped JSON snapshots of every alerts batch (data/alerts/*.json)
+reports/                      Generated: daily_report.md (CAREER COMMAND REPORT, V1.4), weekly_report.md, weekly_strategy.md,
+                               networking_queue.md, browser_search_queue.md, alerts.md
+tests/                        pytest suite: scoring, dedup, normalization, priority, malformed/missing data, sources, pipeline,
+                               applications, AI intelligence engine
 ```
 
 ## Installation
@@ -97,6 +119,9 @@ JSON feeds). See "Sources" below for what each source actually needs.
   (`API` / `PUBLIC_WEB` / `BROWSER_REQUIRED` / `MANUAL`), `requires_login`, `requires_browser`,
   `api_available`, `country_coverage`, `job_types`, `reliability`, and `enabled`, so the engine
   never assumes access it doesn't have.
+- **AI provider:** `config/ai.yaml` — `provider: rule_based` by default (no API key needed to run
+  or test the repository), plus placeholder configs for `openai`/`claude`/`local_llm` and the
+  score thresholds for tiered AI analysis. See "AI Intelligence Engine" below.
 
 ## Sources
 
@@ -353,6 +378,124 @@ highest). `web-import` loads, validates, normalizes, extracts, deduplicates (wit
 merging), scores, saves to `tracking/jobs.csv`, and routes `COMPANY_SIGNAL` results into
 `tracking/companies.csv` as `HIDDEN_OPPORTUNITY` candidates.
 
+## AI Intelligence Engine (V1.4)
+
+The final layer: turns a pile of scored opportunities into "what should I do today, and why."
+Conceptually: `LOAD -> ANALYZE -> SCORE -> DECIDE -> NETWORK -> APPLICATION STRATEGY -> RANK ->
+REPORT -> LEARN`. `scripts/career_intelligence.py` is the orchestrator; everything it calls lives
+in `scripts/intelligence/`.
+
+**AI provider abstraction** (`scripts/intelligence/ai_provider.py`): a generic `AIProvider.analyze(prompt,
+context)` interface so no single AI vendor is hard-coded. The default and only implemented
+provider is `RuleBasedAIProvider` — deterministic local heuristics, zero network calls, zero API
+key. `config/ai.yaml` lists `openai`/`claude`/`local_llm` as placeholders (`implemented: false`);
+selecting one falls back to rule-based behavior (wrapped so the fallback is visible), never
+silently pretends to call a real API, and never reads/stores a credential in this repo. **The
+test suite and every CLI command run with zero API keys.**
+
+**AI cost control (tiers)**, from `config/ai.yaml`:
+| Tier | Score | What runs |
+|---|---|---|
+| 1 | < 70 | Rule-based `match_score` only (V1.1) — no AI analysis |
+| 2 | ≥ 70 | `job_analyzer` runs (fit/quality/risk) |
+| 3 | ≥ 85 | Same analysis, now at "deep" depth (used for `--deep`) |
+| 4 | ≥ 90 | Full application strategy auto-generated, flagged `high_value_application` |
+
+`analyze`/`intelligence` skip tier-1 records by default; `--deep` forces full analysis on every
+record regardless of score (useful for manual review of the whole pipeline, at proportionally
+higher compute cost — still zero AI-vendor cost, since the only implemented provider is local).
+
+**Job analysis** (`scripts/intelligence/job_analyzer.py`) computes `fit_score`, `quality_score`,
+`risk_score` (with named `risk_factors` — missing skills, seniority/location mismatch, visa/salary
+uncertainty, weak company info, stale posting, low source confidence), and `ai_opportunity_score`
+— **a separate assessment from the V1.1 `match_score`, which is never overwritten.**
+
+**Decision engine** (`scripts/intelligence/decision_engine.py`) always returns one of
+`APPLY_NOW / APPLY / NETWORK_FIRST / RESEARCH_COMPANY / CONSIDER / LOW_PRIORITY / SKIP`, with
+`why` (grounded bullets), `risks`, and a concrete `next_action` — e.g.:
+```
+DECISION: APPLY_NOW
+WHY: Strong technical/role fit (95.0%); matches BIM Coordination, Facade Design, Revit, Navisworks.
+RISKS: No major risks flagged.
+NEXT ACTION: Submit a tailored CV and portfolio immediately; identify and contact the BIM/hiring manager.
+```
+`compute_action_priority()` combines match score, AI opportunity score, confidence, and career
+value into one sortable 0–100 number for the daily action queue — it does not replace
+`match_score` or `ai_opportunity_score`, both remain visible individually. Every decision is
+appended to `tracking/decisions.csv` (opportunity, decision, reason, scores, timestamp, evidence,
+next action) for future learning — decision history is never overwritten.
+
+**Skill gap & learning priority** (`scripts/intelligence/skill_gap.py`): each requirement is
+`MATCH` / `PARTIAL_MATCH` / `MISSING` / `UNKNOWN` against `config/profile_skills.yaml` (the single
+source of truth — never duplicated or guessed). Missing skills are only called `CRITICAL` /
+`HIGH_VALUE` / `OPTIONAL` when their observed frequency across `tracking/jobs.csv` actually
+supports it; with too few occurrences, the result is `LOW_VALUE` with a note that market-demand
+data is insufficient — never an invented "this skill is in demand."
+
+**Company analysis** (`scripts/intelligence/company_analyzer.py`): a `COMPANY_PRIORITY` grade
+(`A+`/`A`/`B`/`C`/`D`) from the existing V1.2 `ai_fit_score`, plus hiring/BIM/growth signals and
+likely hiring managers cross-referenced from `tracking/networking.csv`. Every dimension with no
+real evidence source (market reputation, international activity, project quality) reports
+`UNKNOWN` — never guessed. A company with `HIDDEN_OPPORTUNITY` status gets a
+`recommended_networking_action` of `NETWORK_FIRST` even with zero public vacancies.
+
+**Personalized outreach** (`scripts/networking_intelligence.generate_personalized_outreach()`):
+short, specific connection/follow-up/email drafts grounded in the contact's real company/role/
+`why_relevant` context — never the generic "Dear Sir/Madam" template. Drafts only; a human
+reviews and sends every message (see LinkedIn policy below).
+
+**Application strategy & CV change plan** (`scripts/intelligence/application_strategy.py`,
+`cv_strategy.py`): wraps the existing V1.2 `application_intelligence.py` rather than duplicating
+it, adds a `high_value_application` flag at score ≥ 90, and a `CV_CHANGE_PLAN` — "emphasize X",
+"move Y higher", "highlight Z projects" — phrased entirely over the candidate's real, existing
+profile and the posting's actual matched skills. Never rewrites the CV automatically; never
+invents a project, employer, or qualification. Portfolio recommendations honestly report
+`PORTFOLIO_DATA_INSUFFICIENT` today, since `config/profile_skills.yaml` only lists project
+*types*, not individually named projects — the moment real per-project metadata exists, the same
+function returns ranked project recommendations instead.
+
+**Career strategy & market intelligence** (`scripts/intelligence/career_strategy.py`): best
+countries/titles/companies/sources/work-modes and weak spots (low-sample sources, application
+bottlenecks), built on the existing `weekly_analysis.py` aggregation. `market_intelligence()`
+reports skill/title/country demand **with its sample size and a confidence label
+(LOW/MEDIUM/HIGH)** every time — never a bare claim like "Germany is best" from one data point.
+
+**Learning engine** (`scripts/intelligence/learning_engine.py`): response/interview/offer rates
+and networking response rate, grouped by country/job title/source/company — every rate ships with
+its `sample_size`, and segments under the minimum (3) are flagged `insufficient_sample` rather
+than used to draw a conclusion. Snapshots are appended to `tracking/learning.csv` on every
+`intelligence` run, building history over time.
+
+**Alerts** (`scripts/career_intelligence.generate_alerts()`): machine-readable conditions —
+`NEW_EXCEPTIONAL_OPPORTUNITY`, `HIGH_MATCH_JOB`, `HIGH_VALUE_COMPANY`, `NEW_HIDDEN_OPPORTUNITY`,
+`FOLLOW_UP_DUE`, `INTERVIEW`, `OFFER` — written to `tracking/alerts.csv`,
+`data/alerts/<timestamp>.json`, and `reports/alerts.md`. Nothing is sent automatically; alerts are
+for the human to read.
+
+**CAREER COMMAND REPORT**: running `intelligence` overwrites `reports/daily_report.md` with the
+decision-first format (Executive Summary, TOP 10 ACTIONS, APPLY NOW, NETWORK FIRST, HIDDEN
+OPPORTUNITIES, FREELANCE, FOLLOW UPS, SKILL INTELLIGENCE, MARKET INTELLIGENCE). Running `daily`
+alone still writes the original V1.2 report format — nothing about `daily_research.py` changed.
+
+### AI Intelligence CLI
+
+```bash
+python career_hunter.py analyze --score-min 70              # tiered AI job analysis, prints decisions, writes nothing
+python career_hunter.py analyze --score-min 85 --deep        # forces full analysis regardless of tier
+python career_hunter.py decision                             # decision engine only; records to tracking/decisions.csv
+python career_hunter.py strategy                             # career strategy report (best countries/titles/companies/sources)
+python career_hunter.py learning                             # response/interview/offer rates by segment, with sample sizes
+python career_hunter.py market                               # market intelligence: demand signals with sample size
+python career_hunter.py alerts                                # writes reports/alerts.md from current tracking data
+python career_hunter.py intelligence --score-min 70           # full pipeline: LOAD->ANALYZE->DECIDE->NETWORK->APPLY->REPORT->LEARN
+```
+
+`intelligence` LOADs from the JSON snapshots `daily`/`web-import` already save to
+`data/processed/` (the only place the full V1.1 sub-scores persist today — `tracking/jobs.csv`
+itself doesn't store them), so run `daily` or `web-import` at least once before `analyze`/
+`decision`/`intelligence` have anything to analyze. None of these commands send an email, send a
+LinkedIn message, apply to anything, or automate a browser — see LinkedIn policy below.
+
 ## Limitations (stated plainly, not glossed over)
 
 - This sandboxed environment's egress policy blocks the two live API hosts (Remote OK, Remotive)
@@ -374,6 +517,20 @@ merging), scores, saves to `tracking/jobs.csv`, and routes `COMPANY_SIGNAL` resu
   (JSON-LD/microdata), which V1.3 doesn't parse yet. From a bare search snippet, company is only
   filled in when a specific pattern ("X is hiring", "join X") supports it; otherwise the record
   is correctly rejected downstream rather than guessed.
+- No real AI provider (OpenAI/Claude/local LLM) is implemented in V1.4 — `config/ai.yaml` lists
+  them as placeholders only, and selecting one falls back to the rule-based provider rather than
+  pretending to call an API. All V1.4 "AI" reasoning today is explainable, deterministic, local
+  logic grounded in actual record fields — genuinely useful, but not a language model.
+- Portfolio intelligence (`application_strategy.portfolio_recommendation()`) always reports
+  `PORTFOLIO_DATA_INSUFFICIENT` because `config/profile_skills.yaml` has no per-project metadata
+  (only project *types*) — adding real named projects there would make this functional immediately.
+- `career_strategy.market_intelligence()`'s salary pattern is always `DATA_INSUFFICIENT` because
+  `tracking/jobs.csv` doesn't persist `salary_min`/`salary_max` columns today (the opportunity
+  schema has the fields; the CSV tracker doesn't carry them through) — a real limitation worth
+  fixing before salary-pattern analysis can be trusted.
+- `scripts.career_intelligence.analyze_opportunities()` reads from `data/processed/*.json`
+  snapshots, not `tracking/jobs.csv` directly, because the CSV tracker doesn't persist the full
+  V1.1 sub-scores — run `daily`/`web-import` before `analyze`/`decision`/`intelligence`.
 
 ## Tests
 
@@ -399,4 +556,17 @@ textual support), the browser queue (includes BROWSER_REQUIRED sources even when
 false`, priority sorting), provenance/confidence population, stale-opportunity detection
 (including that CLOSED is never inferred from age alone), source-preserving duplicate merging,
 and company entity resolution (merges confident variants, never merges different companies).
-122/122 tests passing as of V1.3.
+
+V1.4 adds coverage for the AI Intelligence Engine: the provider interface and rule-based fallback
+(including an unimplemented-provider configuration falling back safely, with no API key read or
+required), job analysis (fit/quality/risk kept separate from match_score, named risk factors),
+skill-gap classification (never fabricates a candidate skill), frequency-gated learning priority,
+the decision engine (every decision is one of the seven allowed values, always has a reason,
+NETWORK_FIRST for hidden opportunities), action priority bounds, company analysis (UNKNOWN for
+every unevidenced dimension), CV change plans (never claims an unmatched skill), application
+strategy (high-value flag at score ≥ 90), portfolio intelligence (honestly insufficient without
+real project metadata), the learning engine (sample-size gating, never computing a rate without a
+denominator), market intelligence (sample size + confidence label), alerts (fire on real
+conditions only, never on empty input), decision history recording, AI-tier cost control (tier-1
+records skipped by default, included with `--deep`), and missing-profile-data handling.
+170/170 tests passing as of V1.4.

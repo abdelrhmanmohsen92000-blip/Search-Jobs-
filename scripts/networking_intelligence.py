@@ -113,6 +113,47 @@ def draft_talking_points(record):
     )
 
 
+def generate_personalized_outreach(record, company_record=None, evidence=None):
+    """V1.4 Phase 11: short, specific, non-generic connection/follow-up/email
+    drafts grounded in real company/project/role context — never the generic
+    "Dear Sir/Madam, I am looking for a job..." template. `evidence` is an
+    optional specific fact string (a real project, a hiring signal, a post)
+    — when none is supplied, the draft falls back to the record's own
+    `why_relevant` field rather than inventing one.
+
+    Human approval and manual sending remain mandatory — this only drafts.
+    """
+    company = record.get("company", "")
+    role = record.get("role", "")
+    person = record.get("person", "")
+    specific = evidence or record.get("why_relevant") or (company_record or {}).get("bim_activity") or \
+        f"{company}'s work in architecture/BIM"
+
+    connection_message = (
+        f"Hi {person.split()[0] if person else 'there'}, I'm a BIM Architect (Revit/Navisworks, 4+ yrs) and "
+        f"noticed {specific}. Would love to connect and learn more about {company}'s approach to BIM."
+    )[:300]
+
+    follow_up_message = (
+        f"Thanks for connecting. I saw {specific} — really relevant to the BIM coordination and architectural "
+        f"documentation work I do. If {company} ever has a fit for a {role or 'BIM/architecture'} role, "
+        f"I'd welcome the chance to talk. Happy to share my portfolio."
+    )
+
+    email = None
+    if record.get("category", "A") in ("A", "B") or not record.get("profile_url"):
+        email = (
+            f"Subject: BIM Architect — {specific[:60]}\n\n"
+            f"Hi {person.split()[0] if person else 'there'},\n\n"
+            f"I'm reaching out after noticing {specific}. I'm a BIM Architect with 4+ years across BIM "
+            f"coordination, architectural/interior/exterior design, and construction documentation "
+            f"(Revit, Navisworks, AutoCAD, BIM 360/ACC). I'd welcome the chance to discuss how I could "
+            f"contribute to {company}'s work.\n\nCV/portfolio available on request.\n\nBest,\nAbdelrhman Mohsen"
+        )
+
+    return {"connection_message": connection_message, "follow_up_message": follow_up_message, "email": email}
+
+
 def suggested_action(record):
     """Human-performed next step — never automated. See docs/decision-makers.md."""
     connection = (record.get("connection_status") or "not_connected").lower()

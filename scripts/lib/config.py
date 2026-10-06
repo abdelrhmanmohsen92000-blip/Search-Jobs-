@@ -26,6 +26,11 @@ def load_profile_skills():
     return _load_yaml(paths.PROFILE_SKILLS)
 
 
+@functools.lru_cache(maxsize=None)
+def load_ai_config():
+    return _load_yaml(paths.AI_CONFIG)
+
+
 def all_job_titles(matrix=None):
     """Flatten job_families + discovered_titles into one list of titles."""
     matrix = matrix or load_search_matrix()
