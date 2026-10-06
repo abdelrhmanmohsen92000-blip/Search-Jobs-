@@ -1,0 +1,156 @@
+# Search Matrix — job families, employment types, and regional groups.
+# This is the single source of truth read by scripts/search_config.py and
+# scripts/daily_research.py to generate search queries and to classify
+# opportunities by region. New titles/regions discovered during real research
+# cycles should be appended here (with a date comment) rather than hard-coded
+# in scripts.
+
+job_families:
+  bim:
+    - BIM Architect
+    - BIM Coordinator
+    - BIM Specialist
+    - BIM Modeler
+    - Architectural BIM Modeler
+    - BIM Designer
+    - BIM Engineer
+    - BIM Consultant
+    - BIM Technician
+    - BIM Manager
+    - Junior BIM Coordinator
+    - Revit BIM Specialist
+    - Revit Architect
+    - Revit Specialist
+    - Architectural BIM Coordinator
+  architecture:
+    - Architect
+    - Architectural Designer
+    - Architectural Coordinator
+    - Design Architect
+    - Technical Architect
+    - Project Architect
+    - Architectural Consultant
+    - Architectural Engineer
+    - Senior Architect
+    - Junior Architect
+    - Technical Designer
+  interior:
+    - Interior Architect
+    - Interior Designer
+    - Interior Design Architect
+    - Residential Interior Designer
+    - Commercial Interior Designer
+    - Retail Designer
+    - Hospitality Designer
+    - FF&E Designer
+  visualization:
+    - Architectural Visualizer
+    - 3D Architectural Visualizer
+    - 3D Artist
+    - Architectural 3D Artist
+    - Architectural Renderer
+    - 3D Designer
+    - Visualization Artist
+
+# Titles discovered during live research cycles get appended here by the
+# research process (manually or by an agent), tagged with the date found.
+# Format: "<title> # discovered: YYYY-MM-DD"
+discovered_titles: []
+
+employment_types:
+  - Full-time
+  - Part-time
+  - Contract
+  - Freelance
+  - Remote
+  - Hybrid
+  - On-site
+  - Project-based
+
+freelance_keywords:
+  - Revit
+  - BIM
+  - Architecture
+  - Interior Design
+  - Exterior Design
+  - Landscape
+  - AutoCAD
+  - 3D Modeling
+  - Architectural Visualization
+  - Rendering
+  - Villa Design
+  - Residential Design
+  - Commercial Design
+  - BIM Coordination
+  - Shop Drawings
+  - Construction Documentation
+
+# Regional groups used for --region filters and for classifying a found
+# opportunity's country into a region. This is a starting map, not a closed
+# list: an unmapped country is tagged region "unclassified" rather than
+# dropped, and should be added here once confirmed relevant.
+regions:
+  gulf:
+    - Saudi Arabia
+    - United Arab Emirates
+    - Qatar
+    - Kuwait
+    - Bahrain
+    - Oman
+  middle_east:
+    - Egypt
+    - Jordan
+    - Lebanon
+    - Iraq
+    - Turkey
+  europe:
+    - United Kingdom
+    - Ireland
+    - Germany
+    - Netherlands
+    - France
+    - Spain
+    - Italy
+    - Poland
+    - Portugal
+    - Sweden
+    - Norway
+    - Denmark
+    - Switzerland
+    - Belgium
+    - Austria
+  uk:
+    - United Kingdom
+  north_america:
+    - United States
+    - Canada
+  australia_nz:
+    - Australia
+    - New Zealand
+  asia:
+    - Singapore
+    - India
+    - Malaysia
+    - China
+    - Hong Kong
+    - Japan
+    - South Korea
+    - Indonesia
+    - Thailand
+  africa:
+    - Egypt
+    - South Africa
+    - Morocco
+    - Kenya
+    - Nigeria
+  worldwide_remote:
+    - Remote
+
+# Region scoring signals re-evaluated periodically per docs/search-strategy.md.
+# Not used to exclude a region — only to prioritize search effort.
+region_priority_signals:
+  - revit_bim_demand
+  - visa_sponsorship_availability
+  - remote_feasibility
+  - experience_level_fit
+  - salary_to_relocation_ratio

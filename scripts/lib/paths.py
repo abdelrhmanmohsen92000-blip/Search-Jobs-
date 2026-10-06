@@ -1,0 +1,23 @@
+"""Central path constants so every script agrees on repo layout."""
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+CONFIG_DIR = ROOT / "config"
+SCHEMAS_DIR = ROOT / "schemas"
+TRACKING_DIR = ROOT / "tracking"
+DATA_DIR = ROOT / "data"
+DATA_RAW = DATA_DIR / "raw"
+DATA_PROCESSED = DATA_DIR / "processed"
+DATA_ARCHIVE = DATA_DIR / "archive"
+REPORTS_DIR = ROOT / "reports"
+PROFILE_SKILLS = CONFIG_DIR / "profile_skills.yaml"
+SEARCH_MATRIX = CONFIG_DIR / "search_matrix.yaml"
+SOURCES = CONFIG_DIR / "sources.yaml"
+OPPORTUNITY_SCHEMA = SCHEMAS_DIR / "opportunity.schema.json"
+
+JOBS_CSV = TRACKING_DIR / "jobs.csv"
+COMPANIES_CSV = TRACKING_DIR / "companies.csv"
+CONTACTS_CSV = TRACKING_DIR / "contacts.csv"
+APPLICATIONS_CSV = TRACKING_DIR / "applications.csv"
+NETWORKING_CSV = TRACKING_DIR / "networking.csv"

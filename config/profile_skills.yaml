@@ -1,0 +1,64 @@
+# Machine-readable mirror of profile/profile.md, used by scripts/lib/scoring.py
+# to compute matched_skills / missing_skills. Keep in sync with profile.md —
+# profile.md is the human-readable source of truth; this file is what code reads.
+
+experience_years: 4
+
+skills:
+  - BIM Architecture
+  - Architectural Design
+  - Interior Design
+  - Exterior Design
+  - Landscape Design
+  - Architectural Visualization
+  - Technical Documentation
+  - Construction Documentation
+  - BIM Coordination
+  - Multidisciplinary Coordination
+  - Shop Drawings
+  - BOQ / Quantity Extraction
+  - Project Licensing
+  - Master Planning
+  - Facade Design
+  - Clash Coordination
+  - BIM Lifecycle Management
+  - ISO 19650 Concepts
+
+software:
+  - name: Autodesk Revit
+    level: expert
+  - name: Navisworks
+    level: advanced
+  - name: AutoCAD
+    level: advanced
+  - name: BIM 360 / Autodesk Construction Cloud
+    level: working
+  - name: 3ds Max
+    level: working
+
+project_types:
+  - Residential
+  - Luxury Villas
+  - Commercial
+  - Healthcare
+  - Administrative
+  - Landscape / Parks
+  - Large-scale Developments
+  - Interior Projects
+  - Exterior Projects
+
+work_modes:
+  - Full-time
+  - Part-time
+  - Remote
+  - Hybrid
+  - On-site
+  - Contract
+  - Freelance
+  - Project-based
+
+relocation: true
+languages:
+  - Arabic
+  - English
+timezone: GMT+2

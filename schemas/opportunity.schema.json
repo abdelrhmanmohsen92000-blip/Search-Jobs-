@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://search-jobs/schemas/opportunity.schema.json",
+  "title": "Opportunity",
+  "description": "Normalized representation of a single job, freelance, or hidden-opportunity record.",
+  "type": "object",
+  "required": ["id", "source", "job_title", "company", "date_found", "status"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Deterministic id derived from company+title+location+source_url (see scripts/lib/dedup.py)."
+    },
+    "source": { "type": "string", "description": "Name of the source as registered in config/sources.yaml." },
+    "source_url": { "type": ["string", "null"] },
+    "date_found": { "type": "string", "format": "date" },
+    "date_posted": { "type": ["string", "null"] },
+    "company": { "type": "string", "minLength": 1 },
+    "job_title": { "type": "string", "minLength": 1 },
+    "country": { "type": ["string", "null"] },
+    "city": { "type": ["string", "null"] },
+    "region": { "type": ["string", "null"], "description": "Resolved from config/search_matrix.yaml regions map." },
+    "remote": { "type": ["boolean", "null"] },
+    "employment_type": {
+      "type": ["string", "null"],
+      "enum": ["Full-time", "Part-time", "Contract", "Freelance", "Remote", "Hybrid", "On-site", "Project-based", null]
+    },
+    "salary_min": { "type": ["number", "null"] },
+    "salary_max": { "type": ["number", "null"] },
+    "salary_currency": { "type": ["string", "null"] },
+    "experience_required": { "type": ["string", "number", "null"] },
+    "skills_required": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "software_required": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "project_types": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "visa_sponsorship": { "type": ["boolean", "null"] },
+    "work_authorization": { "type": ["string", "null"] },
+    "description": { "type": ["string", "null"] },
+    "match_score": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+    "priority": {
+      "type": ["string", "null"],
+      "enum": ["EXCEPTIONAL", "STRONG", "GOOD", "MODERATE", "LOW", "HIDDEN_OPPORTUNITY", null]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["new", "scored", "applied", "interviewing", "offer", "rejected", "archived"],
+      "default": "new"
+    },
+    "reason": { "type": ["string", "null"], "description": "Human/engine-readable justification for the score and priority." },
+    "risk_flags": { "type": "array", "items": { "type": "string" }, "default": [] }
+  },
+  "additionalProperties": false
+}
