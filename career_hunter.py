@@ -298,8 +298,11 @@ def cmd_company_sources(args):
         if not args.url:
             print("--url is required with --add (use the company's real, verified careers URL).")
             return
-        row = company_careers_lib.add_company_source(args.add, args.url, source_type=args.source_type or "")
-        print(f"Added: {row['company']} -> {row['career_url']}")
+        row = company_careers_lib.add_company_source(
+            args.add, args.url, source_type=args.source_type or "",
+            region=args.region or "UNKNOWN", priority=args.priority or "MEDIUM",
+        )
+        print(f"Added: {row['company']} -> {row['career_url']} (region={row['region']}, priority={row['priority']})")
     elif args.list:
         rows = company_careers_lib.load_company_sources()
         if not rows:
@@ -307,9 +310,10 @@ def cmd_company_sources(args):
                   "then `company-sources --add` with a real, verified URL.")
         for r in rows:
             print(f"{r['company']} ({r.get('source_type', '')}) — {r['career_url']} "
-                  f"[enabled={r.get('enabled')}, last_status={r.get('last_status') or 'never checked'}]")
+                  f"[region={r.get('region', 'UNKNOWN')}, priority={r.get('priority', 'MEDIUM')}, "
+                  f"enabled={r.get('enabled')}, last_status={r.get('last_status') or 'never checked'}]")
     elif args.run:
-        results = company_careers_lib.run_configured_company_sources()
+        results = company_careers_lib.run_configured_company_sources(limit=args.limit)
         if not results:
             print("No enabled company career pages to check.")
         for r in results:
@@ -419,8 +423,12 @@ def build_parser():
     p_company_sources.add_argument("--add", metavar="COMPANY_NAME", default=None)
     p_company_sources.add_argument("--url", default=None, help="The company's real, verified careers URL (required with --add)")
     p_company_sources.add_argument("--source-type", default=None)
+    p_company_sources.add_argument("--region", default=None, help="Verified region/country for this company (UNKNOWN if not yet confirmed)")
+    p_company_sources.add_argument("--priority", default=None, choices=["HIGH", "MEDIUM", "LOW"],
+                                    help="Starting company-fit priority hint (Phase 4) — a human judgment, never computed")
     p_company_sources.add_argument("--list", action="store_true")
     p_company_sources.add_argument("--run", action="store_true", help="Check every enabled configured company career page")
+    p_company_sources.add_argument("--limit", type=int, default=None, help="Cap how many companies are checked this run (HIGH priority first)")
     p_company_sources.set_defaults(func=cmd_company_sources)
 
     return parser

@@ -32,6 +32,8 @@ from scripts.application_intelligence import build_plans_for_qualifying  # noqa:
 from scripts.company_intelligence import hidden_opportunities  # noqa: E402
 from scripts.networking_intelligence import generate_networking_queue, load_networking  # noqa: E402
 from scripts.sources import REGISTRY as SOURCE_REGISTRY  # noqa: E402
+from scripts.intelligence.application_strategy import combined_portfolio_evidence  # noqa: E402
+from scripts.intelligence.ai_provider import tier_for_score  # noqa: E402
 
 DEFAULT_SUB_SCORES = {  # neutral defaults when a raw record has no explicit scoring input
     "technical": 5, "experience": 5, "software": 5, "project": 5,
@@ -181,6 +183,22 @@ def normalize_and_score(raw_records, profile=None):
         opp["reason"] = "; ".join(result["strengths"][:2]) or "Scored with neutral default sub-scores (no explicit assessment provided)."
         opp["scoring_result"] = result
         opp["status"] = opp.get("status") or "scored"
+
+        # Portfolio evidence (Phase 4): rule-based, zero AI cost, so every
+        # normalized opportunity gets it — never gated behind the AI-tier
+        # threshold used for the expensive LLM analysis below. Evidence tiers
+        # (DIRECT_PROJECT_EVIDENCE > PROFILE_CAPABILITY > REGIONAL_EXPERIENCE)
+        # come straight from scripts.intelligence.application_strategy and are
+        # never recomputed or weakened here.
+        evidence = combined_portfolio_evidence(opp, profile=profile)
+        if evidence == "PORTFOLIO_DATA_INSUFFICIENT":
+            opp["portfolio_evidence_summary"] = "PORTFOLIO_DATA_INSUFFICIENT"
+        else:
+            opp["portfolio_evidence_summary"] = {
+                "direct_project_matches": [e for e in evidence if e.get("evidence_tier") == "DIRECT_PROJECT_EVIDENCE"],
+                "profile_capability_matches": [e for e in evidence if e.get("evidence_tier") == "PROFILE_CAPABILITY"],
+                "regional_matches": [e for e in evidence if e.get("evidence_tier") == "REGIONAL_EXPERIENCE"],
+            }
         scored.append(opp)
 
     scored.sort(key=lambda o: o.get("match_score") or 0, reverse=True)  # RANK
@@ -191,7 +209,9 @@ def build_cycle_stats(raw_records, scored, rejected, duplicates, source_health):
     attempted = [h["source"] for h in source_health]
     successful = [h["source"] for h in source_health if h["status"] == "SUCCESS"]
     failed = [h["source"] for h in source_health if h["status"] in ("UNAVAILABLE", "ERROR")]
+    tier_breakdown = collections.Counter(tier_for_score(o.get("match_score")) for o in scored)
     return {
+        "ai_tier_breakdown": {f"tier_{t}": tier_breakdown.get(t, 0) for t in (1, 2, 3, 4)},
         "execution_timestamp": _dt.datetime.now().isoformat(timespec="seconds"),
         "sources_attempted": attempted,
         "sources_successful": successful,
@@ -329,6 +349,32 @@ def generate_daily_report(scored, rejected, duplicates, stats, query_summary, so
     for h in source_health:
         lines.append(f"| {h['source']} | {h['status']} | {len(h.get('opportunities', [])) or h.get('raw_count', 0)} "
                       f"| {h.get('error') or '-'} |")
+    lines.append("")
+
+    tb = stats.get("ai_tier_breakdown", {})
+    lines += ["## AI ANALYSIS", "",
+              f"Tier 1 (rule-based only): {tb.get('tier_1', 0)}  "
+              f"Tier 2 (job analysis): {tb.get('tier_2', 0)}  "
+              f"Tier 3 (deep analysis): {tb.get('tier_3', 0)}  "
+              f"Tier 4 (full application strategy): {tb.get('tier_4', 0)}",
+              "", "Tiers 2-4 are the only ones that call an AI provider — never sent automatically if "
+              "ANTHROPIC_API_KEY is unset, in which case the rule-based provider (free, zero-network) "
+              "is used instead.", ""]
+
+    with_evidence = [o for o in scored if o.get("portfolio_evidence_summary") not in (None, "PORTFOLIO_DATA_INSUFFICIENT")]
+    lines += ["## PORTFOLIO EVIDENCE", "",
+              f"{len(with_evidence)} of {len(scored)} opportunities this cycle have at least one portfolio-evidence "
+              "match (direct project, profile capability, or regional experience).", ""]
+    for o in with_evidence[:10]:
+        summary = o["portfolio_evidence_summary"]
+        parts = []
+        if summary["direct_project_matches"]:
+            parts.append("DIRECT: " + ", ".join(m["project"] for m in summary["direct_project_matches"]))
+        if summary["profile_capability_matches"]:
+            parts.append("CAPABILITY: " + ", ".join(m["capability"] for m in summary["profile_capability_matches"]))
+        if summary["regional_matches"]:
+            parts.append("REGIONAL: " + ", ".join(m["region"] for m in summary["regional_matches"]))
+        lines.append(f"- **{o.get('job_title')} @ {o.get('company')}** — " + " | ".join(parts))
     lines.append("")
 
     if rejected:

@@ -22,7 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import paths, storage  # noqa: E402
 from scripts.sources.base import SourceAdapter, SourceRunResult, http_get_text  # noqa: E402
 
-COMPANY_SOURCES_FIELDNAMES = ["company", "career_url", "source_type", "enabled", "last_checked", "last_status"]
+COMPANY_SOURCES_FIELDNAMES = [
+    "company", "career_url", "source_type", "region", "priority", "enabled", "last_checked", "last_status",
+]
 
 
 class CompanyCareersAdapter(SourceAdapter):
@@ -57,13 +59,20 @@ def load_company_sources(csv_path=None):
     return storage.read_csv(csv_path or paths.COMPANY_CAREER_PAGES_CSV)
 
 
-def add_company_source(company, career_url, source_type="", enabled=True, csv_path=None):
+def add_company_source(company, career_url, source_type="", region="UNKNOWN", priority="MEDIUM", enabled=True, csv_path=None):
     """Adds one row. Never called with a fabricated URL by this codebase —
     the caller (a human, via the CLI) is asserting they've verified it.
+
+    priority (Phase 4 §COMPANY STRATEGY): a starting HIGH/MEDIUM/LOW hint the
+    caller supplies (e.g. from portfolio/geography/role relevance); this
+    module never computes or upgrades it on its own — that would be
+    inventing a company-fit judgment the codebase has no evidence for.
+    region defaults to UNKNOWN rather than guessed from the URL/company name.
     """
     csv_path = csv_path or paths.COMPANY_CAREER_PAGES_CSV
     row = {
         "company": company, "career_url": career_url, "source_type": source_type,
+        "region": region, "priority": priority,
         "enabled": enabled, "last_checked": "", "last_status": "",
     }
     storage.append_csv_rows(csv_path, COMPANY_SOURCES_FIELDNAMES, [row])
@@ -82,6 +91,13 @@ def run_configured_company_sources(csv_path=None, limit=None):
     adapter = CompanyCareersAdapter()
     results = []
     now = _dt.datetime.now().isoformat(timespec="seconds")
+
+    # Company priority (Phase 4 §COMPANY STRATEGY): when a --limit caps how
+    # many get checked this run, HIGH-priority companies are checked first
+    # rather than whichever happens to be earliest in the CSV.
+    priority_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+    if limit:
+        rows = sorted(rows, key=lambda row: priority_rank.get((row.get("priority") or "MEDIUM").upper(), 1))
 
     updated_rows = []
     checked = 0

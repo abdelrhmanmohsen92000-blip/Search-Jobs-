@@ -22,10 +22,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.lib import paths, storage  # noqa: E402
+from scripts.lib.error_types import classify_error  # noqa: E402
 
 FIELDNAMES = [
-    "source", "status", "last_success", "last_failure", "error_type",
-    "request_count", "success_count", "updated_at",
+    "source", "status", "last_success", "last_failure", "error_type", "error_detail",
+    "request_count", "success_count", "consecutive_failures", "updated_at",
 ]
 
 _BLOCKED_MARKERS = ("403", "connect_rejected", "forbidden")
@@ -73,18 +74,45 @@ def record_result(source_name, raw_status, error=None, existing=None, now=None):
 
     request_count = int(existing.get("request_count") or 0) + 1
     success_count = int(existing.get("success_count") or 0) + (1 if status == "AVAILABLE" else 0)
+    is_failure = status in ("DEGRADED", "UNAVAILABLE", "BLOCKED")
+    consecutive_failures = (int(existing.get("consecutive_failures") or 0) + 1) if is_failure else 0
 
     row = {
         "source": source_name,
         "status": status,
         "last_success": now if status == "AVAILABLE" else (existing.get("last_success") or ""),
-        "last_failure": now if status in ("DEGRADED", "UNAVAILABLE", "BLOCKED") else (existing.get("last_failure") or ""),
-        "error_type": (error or "") if status in ("DEGRADED", "UNAVAILABLE", "BLOCKED") else "",
+        "last_failure": now if is_failure else (existing.get("last_failure") or ""),
+        "error_type": classify_error(raw_status, error) or "" if is_failure else "",
+        "error_detail": (error or "") if is_failure else "",
         "request_count": request_count,
         "success_count": success_count,
+        "consecutive_failures": consecutive_failures,
         "updated_at": now,
     }
     return row
+
+
+def source_priority(row):
+    """Routing priority (Phase 4 §SOURCE HEALTH) derived from a source's own
+    recorded health — never a one-strike judgment: a source only drops to LOW
+    after repeated consecutive failures, and AUTH_REQUIRED is its own signal
+    (credentials missing, not a flaky network) rather than a generic failure.
+
+    Returns one of HIGH / MEDIUM / LOW / DISABLED.
+    """
+    status = row.get("status")
+    if status == "MANUAL":
+        return "MEDIUM"  # browser-required/disabled-by-design — routed to the browser queue, not auto-skipped
+    if row.get("error_type") == "AUTH_REQUIRED":
+        return "DISABLED"
+    consecutive_failures = int(row.get("consecutive_failures") or 0)
+    if status == "AVAILABLE" and consecutive_failures == 0:
+        return "HIGH"
+    if consecutive_failures >= 5:
+        return "LOW"
+    if status in ("UNAVAILABLE", "BLOCKED", "DEGRADED"):
+        return "MEDIUM"
+    return "MEDIUM"
 
 
 def update_source_health(source_health_results, csv_path=None):

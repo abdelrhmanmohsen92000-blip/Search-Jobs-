@@ -18,6 +18,9 @@ companies:
   - company: "EXAMPLE — replace with a real, verified company name"
     career_url: "EXAMPLE — replace with the company's real, verified careers URL"
     source_type: "architecture_firm"
+    region: "UNKNOWN"          # fill in once verified — never guessed from the company name/URL
+    priority: "MEDIUM"         # HIGH/MEDIUM/LOW — a starting company-fit hint (portfolio/geography/role
+                               # relevance), set by a human; this codebase never computes or upgrades it
     enabled: true
     last_checked: null
     last_status: null

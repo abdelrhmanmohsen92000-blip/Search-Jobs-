@@ -372,10 +372,26 @@ python career_hunter.py web-import --directory data/raw/search_results/ --dry-ru
 python career_hunter.py research --region gulf                 # Phase 3: runs daily's pipeline + persists a snapshot to data/research_runs/
 python career_hunter.py research --region global --dry-run
 
-python career_hunter.py company-sources --add "Acme Architects" --url https://acme.example/careers --source-type architecture_firm
+python career_hunter.py company-sources --add "Acme Architects" --url https://acme.example/careers --source-type architecture_firm --region UAE --priority HIGH
 python career_hunter.py company-sources --list
 python career_hunter.py company-sources --run                  # checks every enabled company career page
+python career_hunter.py company-sources --run --limit 10        # Phase 4: HIGH-priority companies checked first
 ```
+
+**Phase 4 additions (real job acquisition):** `tracking/source_health.csv` now classifies every
+failure into a canonical `error_type` (`TIMEOUT`/`HTTP_403`/`HTTP_401`/`RATE_LIMITED`/
+`AUTH_REQUIRED`/`NETWORK_ERROR`/`PARSER_ERROR`/`INVALID_RESPONSE`/`PROVIDER_ERROR`/
+`BROWSER_REQUIRED`/`NO_RESULTS`/`SEARCH_PROVIDER_UNAVAILABLE` — see
+`scripts/lib/error_types.py`), with the raw error text preserved separately in `error_detail`.
+`scripts.lib.source_health.source_priority()` turns that history into a routing priority
+(HIGH/MEDIUM/LOW/DISABLED) — a source only drops to LOW after 5+ *consecutive* failures, never
+after one. Company career pages now carry a human-supplied `priority` (HIGH/MEDIUM/LOW) so
+`company-sources --run --limit N` checks the most relevant companies first. Every normalized
+opportunity in a research cycle now carries a `portfolio_evidence_summary` (direct project /
+profile capability / regional matches, from `scripts.intelligence.application_strategy
+.combined_portfolio_evidence()`), not only the ones that clear the AI-tier threshold — this is
+rule-based and costs no AI calls. See `docs/PRODUCTION_READINESS.md` "PHASE 5 — Real Job
+Acquisition" for the full provider-by-provider status.
 
 `web-search` never pretends to have searched: with no live search API or browser-automation
 session configured (the case in this environment, and by design for BROWSER_REQUIRED sources),

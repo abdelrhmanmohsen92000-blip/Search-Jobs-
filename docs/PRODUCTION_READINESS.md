@@ -741,3 +741,93 @@ Any future portfolio project added to `config/portfolio_projects.yaml` should ca
 `source_url`/`source_type`/`evidence_status`, and should only be marked `VERIFIED` once actually
 confirmed from a reachable source in the session doing the import — `PARTIAL` is the honest
 default for anything relayed rather than freshly fetched.
+
+---
+
+## PHASE 5 — Real Job Acquisition & Live Career Intelligence
+
+(Called "Phase 4" in the task prompt that drove this work; numbered PHASE 5 here since this
+document's own prior section — "PHASE 4 — Real Portfolio Data Source (TAFKEEK)" — already used that
+number for the portfolio-import work. Same work, just two different counters.)
+
+**Audit finding:** almost all of the acquisition architecture this phase asked for already existed
+from Phase 3 — global region matrix (`config/search_matrix.yaml` already covers Gulf, Middle East,
+Europe, UK, North America, Oceania, Asia, Africa, worldwide-remote), the full job-family title list,
+the provider interface (`SourceAdapter`/`SourceRunResult`), company career pages as a first-class
+configurable source, source health, browser queue, manual import, deduplication, freshness, and
+rule-based scoring. Nothing in this phase duplicates or replaces any of that.
+
+### What was genuinely missing and added
+
+- **`scripts/lib/error_types.py` (new)** — canonical error-type classification
+  (`TIMEOUT`/`HTTP_403`/`HTTP_401`/`RATE_LIMITED`/`AUTH_REQUIRED`/`NETWORK_ERROR`/`PARSER_ERROR`/
+  `INVALID_RESPONSE`/`PROVIDER_ERROR`/`BROWSER_REQUIRED`/`NO_RESULTS`/`SEARCH_PROVIDER_UNAVAILABLE`).
+  Before this phase, `tracking/source_health.csv`'s `error_type` column actually held raw free-text
+  error strings. It now holds the canonical type; the raw text moved to a new `error_detail` column
+  so no information was lost.
+- **`scripts/lib/source_health.py`** — added `consecutive_failures` tracking and
+  `source_priority(row)` (HIGH/MEDIUM/LOW/DISABLED) implementing the phase's routing rule: a healthy
+  source is HIGH, a source needs 5+ *consecutive* failures (never just one) to drop to LOW, and
+  `AUTH_REQUIRED` is its own DISABLED signal distinct from a flaky network.
+- **`scripts/sources/company_careers.py` + `tracking/company_career_pages.csv` +
+  `config/company_career_pages.example.yaml`** — added `region` and `priority` (HIGH/MEDIUM/LOW)
+  columns. `priority` is a human-supplied company-fit hint (portfolio/geography/role relevance per
+  the phase's "IMPORTANT COMPANY STRATEGY" section) — this codebase never computes or upgrades it
+  itself, it only uses it to check HIGH-priority companies first when `--limit` caps a run.
+- **`scripts/daily_research.py` — portfolio evidence now attached to every normalized opportunity**,
+  not only the ones that clear the AI-tier threshold for expensive LLM analysis. Each scored
+  opportunity gets `portfolio_evidence_summary` (`direct_project_matches` /
+  `profile_capability_matches` / `regional_matches`, or the literal string
+  `PORTFOLIO_DATA_INSUFFICIENT`) straight from `combined_portfolio_evidence()` — the Phase 4
+  evidence-hierarchy function — never recomputed or weakened here. This is rule-based (zero AI cost),
+  consistent with "do not send every discovered job to an expensive LLM."
+- **`scripts/daily_research.py` daily report** — added an `AI ANALYSIS` section (tier 1-4 breakdown
+  via the existing `ai_provider.tier_for_score()`) and a `PORTFOLIO EVIDENCE` section summarizing how
+  many opportunities this cycle have at least one evidence match, and of what kind.
+- **`career_hunter.py company-sources`** — `--region`/`--priority` on `--add`, and `--limit` on
+  `--run` (checks HIGH-priority companies first).
+
+### Providers — actual status, not aspirational
+
+| Provider | Status | Reason |
+|---|---|---|
+| Remote OK (API) | **BLOCKED** | Real HTTP attempt; sandbox egress policy returns 403 on the CONNECT tunnel (confirmed again this phase — same restriction as Phase 1-3). |
+| Remotive (API) | **BLOCKED** | Same as above. |
+| Manual Import | **READY** | Always available; reads `data/raw/search_results/` — the correct fallback path per this phase's "MANUAL IMPORT" section. |
+| Company career pages | **PARTIAL (architecture READY, runtime UNVERIFIED)** | `tracking/company_career_pages.csv` ships empty — no verified company URL exists to check yet; the adapter/CLI/priority routing are all real and tested, just unexercised against a real company this session. |
+| Indeed / Bayt / GulfTalent / Naukrigulf / ArchDaily / Wellfound / We Work Remotely (PUBLIC_WEB) | **PARTIAL** | Raw-HTML fetch only, no parser — unchanged from Phase 3, not addressed this phase (would need a real per-site HTML parser, not invented here). |
+| LinkedIn Jobs / Glassdoor / Upwork (BROWSER_REQUIRED) | **BROWSER_REQUIRED** | Correctly routed to the browser queue; LinkedIn remains human-in-the-loop only, by design, unchanged. |
+| A future search API (SerpAPI/Bing/Google CSE/Tavily/Exa/Brave) | **NOT IMPLEMENTED** | `scripts/web/search_engine.py`'s `WebSearchProvider` interface already supports adding one without touching callers; none is wired up since none can operate without a paid credential this environment doesn't have. |
+
+### Live search verification this session
+
+Re-confirmed, not assumed: a live `research` run (`python career_hunter.py research --region gulf
+--limit 3`) was executed this phase. Remote OK and Remotive both returned a real `403 Forbidden` on
+the egress tunnel — the same sandbox network policy documented in every prior phase. No live job was
+retrieved and none was fabricated; the run correctly reported `0` new opportunities with the real
+error attached to each source.
+
+### Architecture readiness vs runtime/network readiness
+
+| Component | Architecture | Runtime (this sandbox) |
+|---|---|---|
+| Provider abstraction | READY | — |
+| Global search/query generation | READY | READY (produces real query plans) |
+| Company career pages | READY | PARTIAL — no verified company URL configured yet |
+| Browser queue | READY | READY (generates real task lists) |
+| Manual import | READY | READY |
+| Deduplication | READY | READY |
+| Freshness/lifecycle | READY | READY |
+| Source health + priority routing | READY | READY (confirmed live this phase) |
+| Error classification | READY | READY (confirmed live this phase — real 403s classified) |
+| Portfolio evidence integration | READY | READY (confirmed with real + fixture data this phase) |
+| Live API job boards (Remote OK, Remotive) | READY | **BLOCKED by sandbox egress policy** |
+| PUBLIC_WEB boards (Indeed, Bayt, ...) | PARTIAL (no parser) | BLOCKED (same policy) + no parser |
+| Claude AI enrichment | READY | BLOCKED if `ANTHROPIC_API_KEY` unset (optional, pipeline unaffected) |
+
+### Unchanged / preserved
+
+Scoring model, decision engine, portfolio evidence hierarchy ordering
+(`DIRECT_PROJECT_EVIDENCE > PROFILE_CAPABILITY > REGIONAL_EXPERIENCE > INDIRECT_EVIDENCE >
+NO_EVIDENCE`), company/networking/application intelligence, LinkedIn human-in-the-loop policy, AI
+cost tiers, and all 257 tests that existed before this phase — all still pass unmodified.
