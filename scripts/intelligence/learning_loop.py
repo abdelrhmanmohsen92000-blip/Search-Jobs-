@@ -84,7 +84,7 @@ def outcomes(today=None, config=None):
     for f in fb:
         if f.get("outcome") and f["outcome"] != "RATING":
             reached.setdefault(f["job_id"], set()).add(f["outcome"])
-        if f.get("reason"):
+        if f.get("reason") and f.get("kind") in ("rejection", "no_response", "withdrawn"):
             reasons.setdefault(f["job_id"], []).append(f["reason"])
         if f.get("kind") == "job":
             ratings[f["job_id"]] = f.get("rating")

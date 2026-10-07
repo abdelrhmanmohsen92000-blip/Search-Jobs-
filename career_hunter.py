@@ -1,7 +1,28 @@
 #!/usr/bin/env python3
-"""AI Career Hunter — CLI entrypoint (V1.4).
+"""AI Career Hunter — CLI entrypoint (V1.7).
 
-Commands:
+Global option (before the command):
+    --workspace DIR   use DIR for tracking/, data/, reports/ (default: the repository;
+                      same as CAREER_HUNTER_WORKSPACE). The synthetic demo lives in its own workspace.
+
+Daily use (V1.4-V1.7):
+    research [--dry-run]                     research cycle -> analysis -> decisions -> networking -> notifications
+    jobs [--country X --role X --min-score N --decision D --status S --remote true ...]   analyzed jobs
+    job JOB_ID                               decision, reasons, risks, 12 dimensions, skills gap, requirements
+    companies | company COMPANY_ID           company intelligence (grades A+ .. D)
+    applications | application JOB_ID [--status S] [--interview-date D] [--write]   pipeline + packets
+    networking [--refresh | --show ID | --done ID | --approve ID | --dismiss ID]     drafts only, never sent
+    skills | market                          skills gaps / market intelligence
+    report daily | report weekly             Daily Career Brief / weekly market + skills reports
+    feedback application|interview|rejection|offer|no_response|withdrawn|job JOB_ID [--reason ...] [--rating good|bad]
+    learning [evaluate | suggestions | approve ID [--activate] | reject ID]   versioned learning loop
+    schedule list | run-due | run JOB | daemon | cron                         recurring automation
+    notifications [--all] [--mark-read]
+    dashboard [--port 8765]                  local web dashboard
+    config [--validate] [--model-version V]
+    demo [--with-activity] [--reset]         isolated SYNTHETIC demo workspace (offline)
+
+Commands (V1.1-V1.4, unchanged):
     search       [--region <key>|global] [--remote] [--freelance] [--source <name>] [--limit N] [--dry-run]
     score        <technical> <experience> <software> <project> <location> <eligibility> <career_value> <compensation>
     companies    --from-json <file> | --list-hidden
@@ -57,7 +78,7 @@ Examples:
     python career_hunter.py company-sources --list
     python career_hunter.py company-sources --run
 
-V1.4 never sends emails, never sends LinkedIn messages, never applies
+Career Hunter never sends emails, never sends LinkedIn messages, never applies
 automatically, and never automates browser actions — human approval remains
 mandatory for every outward action (see README "LinkedIn / human-approval policy").
 """
@@ -66,7 +87,7 @@ import json
 
 from scripts import company_intelligence, networking_intelligence  # noqa: F401
 from scripts import career_intelligence, daily_research, research, search_config, weekly_analysis, web_research
-from scripts import career_search_modes
+from scripts import career_search_modes, cli_commands
 from scripts.intelligence import career_strategy as career_strategy_lib
 from scripts.intelligence import learning_engine as learning_engine_lib
 from scripts.lib import paths, storage
@@ -129,8 +150,8 @@ def cmd_companies(args):
     elif args.list:
         for c in company_intelligence.load_companies():
             print(f"{c['company_name']} ({c.get('country', '?')}) {c.get('category')} fit={c.get('ai_fit_score')}")
-    else:
-        print("Nothing to do. Use --from-json <file>, --list-hidden, or --list.")
+    else:  # V1.4: company intelligence ranking (grades A+ .. D)
+        cli_commands.companies_ranking(args)
 
 
 def cmd_networking(args):
@@ -143,11 +164,13 @@ def cmd_networking(args):
     if args.generate_queue or args.from_json:
         out = networking_intelligence.generate_networking_queue()
         print(f"Networking queue written to {out}")
-    if not args.from_json and not args.generate_queue:
-        print("Nothing to do. Use --from-json <file> or --generate-queue.")
+    if not args.from_json and not args.generate_queue:  # V1.4: networking engine suggestions
+        return cli_commands.networking_v14(args)
 
 
 def cmd_applications(args):
+    if not args.list_pending and not args.list:  # V1.4: pipeline board
+        return cli_commands.applications_board(args)
     applications = storage.read_csv(paths.APPLICATIONS_CSV)
     if args.list_pending:
         applications = [a for a in applications if a.get("status") not in ("REJECTED", "CLOSED", "ACCEPTED", "")]
@@ -178,6 +201,8 @@ def cmd_weekly(args):
 
 
 def cmd_report(args):
+    if args.kind:  # V1.5: `report daily` (Daily Career Brief) / `report weekly` — from stored data, no research run
+        return cli_commands.report_kind(args)
     cmd_daily(args)
     cmd_weekly(args)
 
@@ -266,13 +291,11 @@ def cmd_strategy(args):
 
 
 def cmd_learning(args):
-    report = learning_engine_lib.full_learning_report()
-    print(json.dumps(report, indent=2, default=str))
+    return cli_commands.learning_v17(args)  # V1.4 segment rates + V1.7 learning loop
 
 
 def cmd_market(args):
-    report = career_strategy_lib.market_intelligence()
-    print(json.dumps(report, indent=2, default=str))
+    return cli_commands.market_v15(args)  # V1.5 market intelligence (--json includes the V1.4 demand signals)
 
 
 def cmd_alerts(args):
@@ -422,6 +445,8 @@ def cmd_company_sources(args):
 
 def build_parser():
     parser = argparse.ArgumentParser(prog="career_hunter.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--workspace", dest="global_workspace", metavar="DIR", default=None,
+                        help="Workspace directory for tracking/, data/, reports/ (default: the repository)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_region_flags(p):
@@ -447,15 +472,24 @@ def build_parser():
     p_companies.add_argument("--from-json")
     p_companies.add_argument("--list-hidden", action="store_true")
     p_companies.add_argument("--list", action="store_true")
+    p_companies.add_argument("--limit", type=int, default=None)
     p_companies.set_defaults(func=cmd_companies)
 
     p_networking = sub.add_parser("networking", help="Add contacts / generate the networking queue")
     p_networking.add_argument("--from-json")
     p_networking.add_argument("--generate-queue", action="store_true")
+    p_networking.add_argument("--refresh", action="store_true", help="Rebuild suggestions from analyzed jobs")
+    p_networking.add_argument("--show", metavar="ACTION_ID", default=None, help="Show the reason, angle and draft")
+    for flag, helptext in (("approve", "you approved the draft"), ("done", "YOU sent it (starts the follow-up clock)"),
+                           ("replied", "they replied"), ("no-response", "no reply"), ("dismiss", "not doing it")):
+        p_networking.add_argument(f"--{flag}", metavar="ACTION_ID", default=None, help=f"Mark: {helptext}")
+    p_networking.add_argument("--note", default=None)
+    p_networking.add_argument("--limit", type=int, default=None)
     p_networking.set_defaults(func=cmd_networking)
 
     p_applications = sub.add_parser("applications", help="List the application tracker")
     p_applications.add_argument("--list-pending", action="store_true")
+    p_applications.add_argument("--list", action="store_true", help="Plain tracker listing (pre-V1.4 output)")
     p_applications.set_defaults(func=cmd_applications)
 
     p_daily = sub.add_parser("daily", help="Run a full daily research cycle")
@@ -466,7 +500,8 @@ def build_parser():
     p_weekly = sub.add_parser("weekly", help="Generate the weekly intelligence report + strategy")
     p_weekly.set_defaults(func=cmd_weekly)
 
-    p_report = sub.add_parser("report", help="Run daily cycle then weekly rollup")
+    p_report = sub.add_parser("report", help="`report daily` / `report weekly` (V1.5); bare `report` = daily cycle + weekly rollup")
+    p_report.add_argument("kind", nargs="?", choices=["daily", "weekly"], default=None)
     add_region_flags(p_report)
     p_report.add_argument("--dry-run", action="store_true")
     p_report.set_defaults(func=cmd_report)
@@ -498,10 +533,16 @@ def build_parser():
     p_strategy = sub.add_parser("strategy", help="Career strategy report (best countries/titles/companies/sources)")
     p_strategy.set_defaults(func=cmd_strategy)
 
-    p_learning = sub.add_parser("learning", help="Response/interview/offer rates by segment, with sample sizes")
+    p_learning = sub.add_parser("learning", help="Learning loop: evaluate | suggestions | approve ID | reject ID (bare: rates + status)")
+    p_learning.add_argument("action", nargs="?", choices=["evaluate", "suggestions", "approve", "reject"], default=None)
+    p_learning.add_argument("suggestion_id", nargs="?", default=None)
+    p_learning.add_argument("--activate", action="store_true", help="approve: also make the new model version active")
+    p_learning.add_argument("--allow-synthetic", action="store_true", help=argparse.SUPPRESS)
+    p_learning.add_argument("--reason", default=None)
     p_learning.set_defaults(func=cmd_learning)
 
-    p_market = sub.add_parser("market", help="Market intelligence: demand signals with sample size")
+    p_market = sub.add_parser("market", help="Market intelligence: jobs by country/role/company, trends, posted salaries")
+    p_market.add_argument("--json", action="store_true")
     p_market.set_defaults(func=cmd_market)
 
     p_alerts = sub.add_parser("alerts", help="Generate reports/alerts.md from current tracking data")
@@ -553,14 +594,23 @@ def build_parser():
     p_company_sources.add_argument("--limit", type=int, default=None, help="Cap how many companies are checked this run (HIGH priority first)")
     p_company_sources.set_defaults(func=cmd_company_sources)
 
+    cli_commands.register(sub)
     return parser
 
 
-def main():
+def main(argv=None):
     parser = build_parser()
-    args = parser.parse_args()
-    args.func(args)
+    args = parser.parse_args(argv)
+    if args.global_workspace:
+        import os
+        os.environ["CAREER_HUNTER_WORKSPACE"] = str(paths.use_workspace(args.global_workspace))
+    if args.command in ("learning",) and args.action in ("approve", "reject") and not args.suggestion_id:
+        parser.error(f"learning {args.action} needs a SUGGESTION_ID (see `learning suggestions`)")
+    return args.func(args)
 
 
 if __name__ == "__main__":
-    main()
+    import signal
+    if hasattr(signal, "SIGPIPE"):  # `career_hunter.py jobs | head` exits quietly
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    raise SystemExit(main() or 0)

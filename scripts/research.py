@@ -88,7 +88,7 @@ def run_research(region=None, remote=False, freelance=False, source_filter=None,
         "completed_at": completed_at,
         "queries": result.get("query_summary", {}),
         "providers": {
-            "attempted": stats.get("sources_attempted", []),
+            "attempted": [h["source"] for h in source_health if h.get("status") not in _NOT_ATTEMPTED],
             "successful": stats.get("sources_successful", []),
             "failed": stats.get("sources_failed", []),
         },
