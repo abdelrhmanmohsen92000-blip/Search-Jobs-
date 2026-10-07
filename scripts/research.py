@@ -19,6 +19,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts import daily_research  # noqa: E402
 from scripts.lib import paths  # noqa: E402
+from scripts.lib import source_health as source_health_lib  # noqa: E402
+
+_NOT_ATTEMPTED = ("NOT_RUN_THIS_CYCLE", "DISABLED", "BROWSER_REQUIRED", "MANUAL", "NOT_IMPLEMENTED",
+                  "AUTH_REQUIRED", "COOLDOWN")
 
 SNAPSHOT_FIELDS_HELP = (
     "run_id, started_at, completed_at, queries, providers, results_count, "
@@ -33,6 +37,13 @@ def _determine_status(stats, source_health):
     any_failed = any(h.get("status") in ("UNAVAILABLE", "ERROR") for h in source_health)
     if stats.get("number_new", 0) > 0:
         return "SUCCESS"
+    # Phase 5: Manual Import only reads local files, so it reaching "successfully"
+    # says nothing about live acquisition. If every live source failed, the run
+    # is not a success even when nothing was found.
+    live_available = any(h.get("status") in ("SUCCESS", "EMPTY") and h.get("source") != "Manual Import"
+                         for h in source_health)
+    if any_failed and not live_available:
+        return "PARTIAL" if any_available else "FAILED"
     if any_available and not stats.get("number_collected"):
         return "SUCCESS"  # reached sources fine, genuinely nothing new to report
     if any_failed and not any_available:
@@ -62,11 +73,13 @@ def run_research(region=None, remote=False, freelance=False, source_filter=None,
             "queries": result["query_summary"], "providers": [], "results_count": 0,
             "new_jobs": 0, "duplicates": 0, "errors": [], "source_health": [],
             "status": "DRY_RUN", "mode": mode,
+            "acquisition_plan": result.get("acquisition_plan"),
         }
         return {**snapshot, "pipeline_result": result}
 
     stats = result["stats"]
-    source_health = result["source_health"]
+    # The run record keeps each source's outcome, never the raw job payloads it returned.
+    source_health = [{k: v for k, v in h.items() if k != "opportunities"} for h in result["source_health"]]
     errors = [{"source": h["source"], "error": h.get("error")} for h in source_health if h.get("error")]
 
     snapshot = {
@@ -87,6 +100,21 @@ def run_research(region=None, remote=False, freelance=False, source_filter=None,
         "status": _determine_status(stats, source_health),
         "mode": mode,
         "exceptional_count": sum(1 for o in result.get("scored", []) if o.get("exceptional_opportunity")),
+        # Phase 5 run record
+        "sources_attempted": [h["source"] for h in source_health if h.get("status") not in _NOT_ATTEMPTED],
+        "sources_successful": [h["source"] for h in source_health if h.get("status") in ("SUCCESS", "EMPTY")],
+        "sources_blocked": [h["source"] for h in source_health
+                            if source_health_lib.classify_status(h.get("status"), h.get("error")) == "BLOCKED"],
+        "sources_auth_required": [h["source"] for h in source_health if h.get("status") == "AUTH_REQUIRED"],
+        "sources_in_cooldown": [h["source"] for h in source_health if h.get("status") == "COOLDOWN"],
+        "requests": stats.get("requests_made", 0),
+        "raw_results": stats.get("number_collected", 0),
+        "normalized_opportunities": stats.get("number_valid", 0),
+        "new_opportunities": stats.get("jobs_inserted", 0),
+        "updated_opportunities": stats.get("jobs_updated", 0),
+        "duplicates_merged": stats.get("number_duplicates", 0),
+        "exceptional_opportunities": sum(1 for o in result.get("scored", []) if o.get("exceptional_opportunity")),
+        "search_discovery": stats.get("search_discovery") or {},
     }
 
     paths.DATA_RESEARCH_RUNS.mkdir(parents=True, exist_ok=True)
@@ -117,6 +145,21 @@ def print_research_summary(snapshot):
     print(f"Research run {snapshot['run_id']} — status: {snapshot['status']}" + (f" — mode: {mode}" if mode else ""))
     if snapshot["status"] == "DRY_RUN":
         print(f"  Dry run — {snapshot['queries']['total_queries']} queries would be generated; nothing executed.")
+        plan = snapshot.get("acquisition_plan")
+        if plan:
+            print("  Source routing (no request made, nothing written):")
+            for src in plan["sources"]:
+                print(f"    {src['source']:<45} {src['planned']}  [last: {src['last_health_state']}]")
+            cp = plan["company_pages"]
+            print(f"  Company career pages to check ({len(cp['to_check'])}): {', '.join(cp['to_check']) or 'none'}")
+            if cp["in_cooldown"]:
+                print(f"  Company pages in cooldown: {', '.join(cp['in_cooldown'])}")
+            print(f"  Browser tasks — careers URL to verify: {', '.join(cp['needs_url_verification']) or 'none'}")
+            sp = plan["search_provider"]
+            print(f"  {sp['name']}: {sp['status']} — {len(sp['queries'])} discovery queries, e.g. "
+                  f"{'; '.join(sp['queries'][:3])}")
+            req = plan["max_expected_requests"]
+            print(f"  Max requests: company pages {req['company_pages']}, search provider {req['search_provider']}")
         return
     providers = snapshot["providers"]
     print(f"  Providers attempted:  {', '.join(providers['attempted']) or 'none'}")
@@ -126,6 +169,12 @@ def print_research_summary(snapshot):
     print(f"  New opportunities: {snapshot['new_jobs']}")
     print(f"  Duplicates: {snapshot['duplicates']}")
     print(f"  Exceptional opportunities: {snapshot.get('exceptional_count', 0)}")
+    if "requests" in snapshot:
+        print(f"  Requests made: {snapshot['requests']}   New rows: {snapshot['new_opportunities']}   "
+              f"Updated rows: {snapshot['updated_opportunities']}")
+        print(f"  Blocked: {', '.join(snapshot['sources_blocked']) or 'none'}   "
+              f"Auth required: {', '.join(snapshot['sources_auth_required']) or 'none'}   "
+              f"In cooldown: {', '.join(snapshot['sources_in_cooldown']) or 'none'}")
     if snapshot["errors"]:
         print("  Errors:")
         for e in snapshot["errors"]:

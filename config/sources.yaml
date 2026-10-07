@@ -31,6 +31,17 @@ job_boards:
     job_types: [Full-time, Contract, Remote]
     reliability: high
     enabled: true
+    # Phase 5 capability model — what the adapter (scripts/sources/remoteok.py) actually does.
+    # No server-side filters: the whole feed is fetched once, then normalized,
+    # mode-classified and filtered locally (QUERY BROADLY -> NORMALIZE -> CLASSIFY -> FILTER).
+    capabilities:
+      keyword_filter: false
+      employment_type: false
+      remote_filter: false   # every listing is remote by nature of the board
+      location_filter: false
+      pagination: false
+      date_filter: false
+      structured_data: true
 
   - name: Remotive
     type: job_board
@@ -45,6 +56,15 @@ job_boards:
     job_types: [Full-time, Contract, Freelance, Remote]
     reliability: high
     enabled: true
+    # Phase 5 capability model — scripts/sources/remotive.py sends ?search=<term> only.
+    capabilities:
+      keyword_filter: true
+      employment_type: false  # job_type is read from each listing, never requested as a filter
+      remote_filter: false    # remote-only board
+      location_filter: false
+      pagination: false
+      date_filter: false
+      structured_data: true
 
   - name: LinkedIn Jobs
     type: job_board
@@ -180,11 +200,15 @@ company_sources:
     requires_login: false
     requires_browser: false
     supported_search_types: [company_discovery]
-    rate_limit_notes: "Per-company; scripts/sources/company_careers.py fetches raw HTML only."
+    rate_limit_notes: "Per-company; at most search_limits.max_requests_per_source pages per company per run."
     country_coverage: global
     job_types: [all]
     reliability: variable
     enabled: true
+    # Phase 5: scripts/sources/company_careers.py extracts schema.org JobPosting data
+    # from the careers page and its same-site job links; no server-side filters.
+    capabilities:
+      structured_data: true
   - name: Architecture firm websites
     type: company_source
     access_method: PUBLIC_WEB
@@ -378,3 +402,47 @@ professional_community_sources:
     job_types: [all]
     reliability: low
     enabled: true
+
+# Phase 5 — search-engine providers. Used for discovery (job pages, career
+# pages); a search result is only a lead until its page is fetched and parsed.
+# `implemented` reflects real code; `credential_env` names the environment
+# variable the key must come from (never stored in this repository).
+search_providers:
+  - name: Brave Search API
+    type: search_engine
+    url: https://api.search.brave.com/res/v1/web/search
+    access_method: API_KEY
+    implemented: true            # scripts/web/brave_search.py
+    credential_env: BRAVE_SEARCH_API_KEY
+    api_available: true
+    requires_login: false
+    requires_browser: false
+    capabilities:
+      keyword_filter: true
+      location_filter: false     # location is part of the query text only
+      employment_type: false
+      pagination: false
+      date_filter: false
+      structured_data: true
+    enabled: true
+  - name: SerpAPI
+    type: search_engine
+    url: https://serpapi.com/search.json
+    access_method: API_KEY
+    implemented: false
+    credential_env: SERPAPI_API_KEY
+    enabled: false
+  - name: Bing Web Search API
+    type: search_engine
+    url: https://api.bing.microsoft.com/v7.0/search
+    access_method: API_KEY
+    implemented: false
+    credential_env: BING_SEARCH_API_KEY
+    enabled: false
+  - name: Tavily
+    type: search_engine
+    url: https://api.tavily.com/search
+    access_method: API_KEY
+    implemented: false
+    credential_env: TAVILY_API_KEY
+    enabled: false

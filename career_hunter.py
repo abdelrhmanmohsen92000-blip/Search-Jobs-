@@ -23,6 +23,9 @@ Commands:
     research     [--region ...] [--remote] [--freelance] [--source <name>] [--limit N] [--dry-run]  (Phase 3: persisted research-run snapshot)
                  [--mode <name> | --all-modes] [--force]   (Phase 4.2: career search modes; --force bypasses due checks)
     career-state [--show] [--mode <name>] [--all] [--dry-run] [--limit N]   (Phase 4.1)
+    sources                                          (Phase 5: source registry, implementation, capabilities)
+    source-health                                    (Phase 5: health state, failures, cooldowns)
+    research-status [--last N]                       (Phase 5: recent research runs)
     company-sources --add <name> --url <url> [--source-type <type>] | --list | --run
 
 Examples:
@@ -319,6 +322,52 @@ def cmd_research(args):
     research.print_research_summary(snapshot)
 
 
+def cmd_sources(args):
+    """Phase 5: the source registry — what exists, what is implemented, what it can filter on."""
+    from scripts.lib import source_registry
+    print(f"{'SOURCE':<45} {'IMPLEMENTATION':<16} {'ENABLED':<8} CAPABILITIES")
+    for s in source_registry.list_sources():
+        caps = ", ".join(k for k, v in s["capabilities"].items() if v) or "-"
+        cred = ""
+        if s["credential_env"] and s["implementation"] == "SEARCH_PROVIDER":
+            cred = f"  [{s['credential_env']}: {'set' if s['credential_present'] else 'NOT SET -> AUTH_REQUIRED'}]"
+        print(f"{s['name']:<45} {s['implementation']:<16} {str(s['enabled']):<8} {caps}{cred}")
+    from scripts.sources import company_careers
+    targets = company_careers.load_targets()
+    verified = [t for t in targets if company_careers.has_verified_url(t)]
+    print(f"\nTarget companies (config/target_companies.yaml): {len(targets)} total, {len(verified)} with a "
+          f"search-indexed/verified careers URL, {len(targets) - len(verified)} awaiting URL verification.")
+
+
+def cmd_source_health(args):
+    """Phase 5: persistent source health — nothing hidden, failures first-class."""
+    from scripts.lib import source_health
+    rows = source_health.load_health()
+    if not rows:
+        print("No source health recorded yet — run `python career_hunter.py research` first.")
+        return
+    print(f"{'SOURCE':<45} {'HEALTH':<17} {'LAST ATTEMPT':<20} {'LAST SUCCESS':<20} {'FAILS':<5} {'COOLDOWN UNTIL':<20} ERROR")
+    order = {s: i for i, s in enumerate(source_health.HEALTH_STATES)}
+    for name, r in sorted(rows.items(), key=lambda kv: (order.get(kv[1].get("health_state") or "UNKNOWN", 99), kv[0])):
+        print(f"{name[:44]:<45} {(r.get('health_state') or 'UNKNOWN'):<17} {(r.get('last_attempt') or '-'):<20} "
+              f"{(r.get('last_success') or '-'):<20} {(r.get('consecutive_failures') or '0'):<5} "
+              f"{(r.get('cooldown_until') or '-'):<20} {(r.get('error_type') or '')} {(r.get('error_detail') or '')[:60]}")
+
+
+def cmd_research_status(args):
+    """Phase 5: the most recent research runs, from data/research_runs/."""
+    runs = research.load_research_runs()
+    if not runs:
+        print("No research runs recorded yet.")
+        return
+    for snap in sorted(runs, key=lambda r: r.get("started_at") or "")[-args.last:]:
+        print(f"{snap.get('started_at')}  {snap.get('run_id')}  status={snap.get('status')}  mode={snap.get('mode') or '-'}  "
+              f"requests={snap.get('requests', '?')}  raw={snap.get('raw_results', snap.get('results_count', 0))}  "
+              f"new={snap.get('new_opportunities', snap.get('new_jobs', 0))}  "
+              f"updated={snap.get('updated_opportunities', '?')}  "
+              f"blocked={','.join(snap.get('sources_blocked') or []) or '-'}")
+
+
 def cmd_career_state(args):
     if args.show:
         career_search_modes.print_career_state()
@@ -473,6 +522,14 @@ def build_parser():
     p_research.add_argument("--force", action="store_true",
                             help="With --mode/--all-modes: bypass the frequency/due check (never a disabled mode)")
     p_research.set_defaults(func=cmd_research)
+
+    sub.add_parser("sources", help="Source registry: implementation status and capabilities (Phase 5)").set_defaults(
+        func=cmd_sources)
+    sub.add_parser("source-health", help="Persistent source health and cooldowns (Phase 5)").set_defaults(
+        func=cmd_source_health)
+    p_research_status = sub.add_parser("research-status", help="Recent research runs (Phase 5)")
+    p_research_status.add_argument("--last", type=int, default=10)
+    p_research_status.set_defaults(func=cmd_research_status)
 
     p_career_state = sub.add_parser("career-state", help="Career Search Modes Engine (Phase 4.1)")
     p_career_state.add_argument("--show", action="store_true", help="Print current primary goal + active modes and exit")

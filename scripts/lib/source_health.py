@@ -27,7 +27,30 @@ from scripts.lib.error_types import classify_error  # noqa: E402
 FIELDNAMES = [
     "source", "status", "last_success", "last_failure", "error_type", "error_detail",
     "request_count", "success_count", "consecutive_failures", "updated_at",
+    # Phase 5 — appended so older rows/readers keep working.
+    "health_state", "last_attempt", "http_status", "last_result_count", "cooldown_until",
 ]
+
+# Phase 5 user-facing health vocabulary (`health_state`), next to the
+# original 5-state `status` which is kept unchanged for compatibility:
+#   VERIFIED         live request succeeded (data or a genuine empty result)
+#   PARTIAL          reached, but nothing could be extracted (e.g. no parser output)
+#   BLOCKED          actively refused (HTTP 403, proxy refused the tunnel)
+#   AUTH_REQUIRED    needs credentials that are not configured (HTTP 401 / missing key)
+#   BROWSER_REQUIRED protected source — human-in-the-loop browser queue only
+#   PARSER_FAILED    response received but could not be parsed
+#   RATE_LIMITED     HTTP 429 / explicit rate limit
+#   UNAVAILABLE      transient: timeout, DNS, 5xx
+#   UNKNOWN          never attempted
+HEALTH_STATES = ("VERIFIED", "PARTIAL", "BLOCKED", "AUTH_REQUIRED", "BROWSER_REQUIRED",
+                 "PARSER_FAILED", "RATE_LIMITED", "UNAVAILABLE", "UNKNOWN")
+
+# Used only when config/search_matrix.yaml has no `source_policy` section.
+FALLBACK_POLICY = {
+    "cooldown_minutes": {"BLOCKED": 1440, "AUTH_REQUIRED": 1440, "RATE_LIMITED": 60,
+                         "PARSER_FAILED": 360, "UNAVAILABLE": 15},
+    "max_cooldown_minutes": 1440,
+}
 
 _BLOCKED_MARKERS = ("403", "connect_rejected", "forbidden")
 
@@ -43,7 +66,66 @@ _STATUS_MAP = {
     "DISABLED": "MANUAL",
     "MANUAL": "MANUAL",
     "NOT_RUN_THIS_CYCLE": "MANUAL",  # never actually attempted this run — not a failure
+    "AUTH_REQUIRED": "MANUAL",  # credentials missing — never attempted, so not a failed request
+    "COOLDOWN": "MANUAL",  # skipped on purpose during a backoff window — not a failed request
 }
+
+_NOT_ATTEMPTED = ("NOT_RUN_THIS_CYCLE", "DISABLED", "NOT_IMPLEMENTED", "MANUAL", "COOLDOWN")
+
+
+def load_policy(matrix=None):
+    from scripts.lib import config as cfg_lib
+    matrix = matrix if matrix is not None else cfg_lib.load_search_matrix()
+    policy = matrix.get("source_policy") or {}
+    return {
+        "cooldown_minutes": {**FALLBACK_POLICY["cooldown_minutes"], **(policy.get("cooldown_minutes") or {})},
+        "max_cooldown_minutes": policy.get("max_cooldown_minutes", FALLBACK_POLICY["max_cooldown_minutes"]),
+    }
+
+
+def derive_health_state(raw_status, status, error_type, previous=None):
+    """Maps one attempt onto the Phase 5 HEALTH_STATES vocabulary."""
+    if raw_status == "BROWSER_REQUIRED":
+        return "BROWSER_REQUIRED"
+    if raw_status == "AUTH_REQUIRED" or error_type in ("AUTH_REQUIRED", "HTTP_401"):
+        return "AUTH_REQUIRED"
+    if raw_status in _NOT_ATTEMPTED:
+        return previous or "UNKNOWN"
+    if status == "AVAILABLE":
+        return "VERIFIED"
+    if error_type == "RATE_LIMITED":
+        return "RATE_LIMITED"
+    if status == "BLOCKED" or error_type == "HTTP_403":
+        return "BLOCKED"
+    if error_type in ("PARSER_ERROR", "INVALID_RESPONSE"):
+        return "PARSER_FAILED"
+    if status == "DEGRADED":
+        return "PARTIAL"
+    return "UNAVAILABLE"
+
+
+def cooldown_minutes(health_state, consecutive_failures, policy=None):
+    """Backoff window after a failure. Transient UNAVAILABLE failures back off
+    exponentially; every window is capped, so no source is ever removed for
+    good — it is simply re-checked once the window passes (Phase 5 §30)."""
+    policy = policy or load_policy()
+    base = policy["cooldown_minutes"].get(health_state)
+    if not base:
+        return 0
+    if health_state == "UNAVAILABLE":
+        base = base * (2 ** max(0, consecutive_failures - 1))
+    return min(base, policy["max_cooldown_minutes"])
+
+
+def in_cooldown(row, now=None):
+    until = (row or {}).get("cooldown_until")
+    if not until:
+        return False
+    now = now or _dt.datetime.now()
+    try:
+        return _dt.datetime.fromisoformat(until) > now
+    except ValueError:
+        return False
 
 
 def classify_status(raw_status, error=None):
@@ -63,7 +145,8 @@ def load_health(csv_path=None):
     return {r["source"]: r for r in rows if r.get("source")}
 
 
-def record_result(source_name, raw_status, error=None, existing=None, now=None):
+def record_result(source_name, raw_status, error=None, existing=None, now=None, http_status=None,
+                  result_count=None, policy=None):
     """Pure function: given the current health row for a source (or None for
     a never-seen source) and a new result, returns the updated row. Kept
     separate from file I/O so it's trivially testable.
@@ -76,18 +159,33 @@ def record_result(source_name, raw_status, error=None, existing=None, now=None):
     success_count = int(existing.get("success_count") or 0) + (1 if status == "AVAILABLE" else 0)
     is_failure = status in ("DEGRADED", "UNAVAILABLE", "BLOCKED")
     consecutive_failures = (int(existing.get("consecutive_failures") or 0) + 1) if is_failure else 0
+    error_type = (classify_error(raw_status, error) or "") if is_failure else ""
+    if http_status == 429:
+        error_type = "RATE_LIMITED"
+    health_state = derive_health_state(raw_status, status, error_type, existing.get("health_state"))
+
+    cooldown_until = ""
+    if is_failure:
+        minutes = cooldown_minutes(health_state, consecutive_failures, policy)
+        if minutes:
+            cooldown_until = (_dt.datetime.fromisoformat(now) + _dt.timedelta(minutes=minutes)).isoformat(timespec="seconds")
 
     row = {
         "source": source_name,
         "status": status,
         "last_success": now if status == "AVAILABLE" else (existing.get("last_success") or ""),
         "last_failure": now if is_failure else (existing.get("last_failure") or ""),
-        "error_type": classify_error(raw_status, error) or "" if is_failure else "",
+        "error_type": error_type,
         "error_detail": (error or "") if is_failure else "",
         "request_count": request_count,
         "success_count": success_count,
         "consecutive_failures": consecutive_failures,
         "updated_at": now,
+        "health_state": health_state,
+        "last_attempt": now,
+        "http_status": http_status if http_status is not None else "",
+        "last_result_count": result_count if result_count is not None else "",
+        "cooldown_until": cooldown_until,
     }
     return row
 
@@ -132,15 +230,23 @@ def update_source_health(source_health_results, csv_path=None):
             continue
         raw_status = result.get("status")
         mapped = classify_status(raw_status, result.get("error"))
+        previous = existing.get(source_name, {})
+        if raw_status == "COOLDOWN" and previous:
+            continue  # skipped during its backoff window: the last real outcome stands unchanged
         if mapped == "MANUAL":
             # Record its presence/current state without inflating request/success counters —
             # a BROWSER_REQUIRED source isn't "attempted and failed", it's "not auto-run by design".
-            row = {**existing.get(source_name, {}), "source": source_name, "status": "MANUAL",
+            row = {**previous, "source": source_name, "status": "MANUAL",
                    "updated_at": _dt.datetime.now().isoformat(timespec="seconds")}
             for field in FIELDNAMES:
                 row.setdefault(field, "")
+            row["health_state"] = derive_health_state(raw_status, "MANUAL", "", previous.get("health_state"))
+            if raw_status == "AUTH_REQUIRED":
+                row["error_type"], row["error_detail"] = "AUTH_REQUIRED", result.get("error") or ""
         else:
-            row = record_result(source_name, raw_status, result.get("error"), existing.get(source_name))
+            row = record_result(source_name, raw_status, result.get("error"), previous,
+                                http_status=result.get("http_status"),
+                                result_count=len(result.get("opportunities") or []) or result.get("raw_count"))
         existing[source_name] = row
 
     storage.write_csv(csv_path, FIELDNAMES, list(existing.values()))

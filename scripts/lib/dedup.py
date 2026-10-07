@@ -2,6 +2,7 @@
 import difflib
 import hashlib
 import re
+import urllib.parse
 
 
 def _norm(text):
@@ -12,9 +13,31 @@ def _norm(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
+_TRACKING_PARAMS = {"gclid", "fbclid", "msclkid", "mc_cid", "mc_eid", "_ga", "_gl", "ref", "refid",
+                    "referrer", "trk", "trackingid", "src", "igshid"}
+
+
+def canonical_url(url):
+    """Identity form of a URL (Phase 5): lowercase scheme/host, no 'www.',
+    no fragment, no tracking parameters (utm_*, gclid, fbclid, ...), sorted
+    remaining parameters, no trailing slash. The original URL is still what
+    gets stored — this is only used to decide "same posting?"."""
+    if not url:
+        return url
+    parsed = urllib.parse.urlparse(str(url).strip())
+    if not parsed.scheme or not parsed.netloc:
+        return str(url).strip()
+    host = parsed.netloc.lower()
+    host = host[4:] if host.startswith("www.") else host
+    params = sorted((k, v) for k, v in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+                    if not k.lower().startswith("utm_") and k.lower() not in _TRACKING_PARAMS)
+    return urllib.parse.urlunparse((parsed.scheme.lower(), host, parsed.path.rstrip("/") or "/", "",
+                                    urllib.parse.urlencode(params), ""))
+
+
 def make_id(company, title, location, source_url):
-    """Deterministic id: stable hash of normalized company+title+location+source_url."""
-    key = "|".join(_norm(x) for x in (company, title, location, source_url))
+    """Deterministic id: stable hash of normalized company+title+location+canonical source_url."""
+    key = "|".join(_norm(x) for x in (company, title, location, canonical_url(source_url)))
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
 
@@ -23,7 +46,7 @@ def exact_key(opportunity):
         _norm(opportunity.get("company")),
         _norm(opportunity.get("job_title")),
         _norm(opportunity.get("city") or opportunity.get("country")),
-        _norm(opportunity.get("source_url")),
+        _norm(canonical_url(opportunity.get("source_url"))),
     )
 
 

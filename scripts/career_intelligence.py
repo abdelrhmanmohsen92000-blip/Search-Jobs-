@@ -68,6 +68,18 @@ def opportunity_from_jobs_row(row):
         "exceptional_reasons": opportunity_modes.parse_list(row.get("exceptional_reasons")),
         "alternate_sources": [{"source": None, "source_url": u}
                               for u in opportunity_modes.parse_list(row.get("alternate_source_urls"))],
+        # Phase 5 — pre-Phase-5 rows read back as unknown, never guessed.
+        "date_posted": row.get("date_posted") or None,
+        "closing_date": row.get("closing_date") or None,
+        "freshness": row.get("freshness") or "UNKNOWN",
+        "lifecycle_status": row.get("lifecycle_status") or None,
+        "job_page_url": row.get("job_page_url") or None,
+        "application_url": row.get("application_url") or "UNKNOWN",
+        "company_career_url": row.get("company_career_url") or None,
+        "confidence_score": _float_or_none(row.get("confidence_score")),
+        "provenance": {"source": row.get("source"), "source_url": row.get("source_url") or None, "search_query": None,
+                       "retrieved_at": row.get("retrieved_at") or None,
+                       "extraction_method": row.get("extraction_method") or None, "confidence": None},
         "id": row.get("id"), "date_found": row.get("date_found"), "source": row.get("source"),
         "source_url": row.get("source_url") or None, "job_title": row.get("job_title"), "company": row.get("company"),
         "country": row.get("country") or None, "city": row.get("city") or None, "region": row.get("region") or None,

@@ -395,6 +395,60 @@ python career_hunter.py career-state --mode CONTRACT --region gulf # run one mod
 python career_hunter.py career-state --all --limit 100             # run every active mode now
 ```
 
+**Phase 5 additions (Live Opportunity Acquisition):** the acquisition side of the pipeline —
+career state → modes → queries → source router → source health → live acquisition → normalize →
+verify → dedup → modes → score → portfolio evidence → career priority → exceptional → report.
+
+| Source | What it does | Status in this sandbox |
+|---|---|---|
+| Company career pages (`config/target_companies.yaml`) | Fetches each careers page, follows same-site job links (within budget), extracts schema.org **JobPosting** JSON-LD | BLOCKED (egress policy) |
+| Remote OK / Remotive | Structured public APIs; no employment-type filter, so results are classified locally | BLOCKED |
+| Brave Search API | Discovery: a result becomes a job only after its page is fetched and parsed as a JobPosting | AUTH_REQUIRED (`BRAVE_SEARCH_API_KEY` unset) |
+| SerpAPI / Bing / Tavily | Declared extension points only | NOT_IMPLEMENTED |
+| LinkedIn / Glassdoor / Upwork | Never fetched — browser-queue tasks for a human | BROWSER_REQUIRED |
+| Manual import | `data/raw/` and `web-import` | READY |
+
+- **Target companies:** `config/target_companies.yaml` holds 9 career URLs found on each company's
+  own domain via web search (Saudi Arabia: NEOM, Red Sea Global, ROSHN, Dar, Khatib & Alami; UAE: Aldar,
+  AtkinsRéalis; Qatar: Qatari Diar; global: Gensler), marked `SEARCH_INDEXED` — not yet fetched by this
+  system. Diriyah Company, AECOM and Zaha Hadid Architects have no confirmed URL: they stay disabled
+  and become `VERIFY_COMPANY_CAREER_URL` browser tasks. Never add a URL that has not been verified.
+- **Job verification:** fields come only from the page's structured data (title, company, location,
+  employment type, remote via `TELECOMMUTE`, dates, salary when published). A page with no JobPosting
+  creates nothing. `application_url` is `UNKNOWN` unless the posting declares direct apply;
+  `job_page_url`, `company_career_url` and `source_url` are kept separately. A past `validThrough`
+  or an explicit "no longer available" statement marks the job CLOSED; history is kept.
+- **Freshness:** `FRESH` (≤3 days) / `RECENT` (≤14) / `AGING` (≤30) / `STALE` / `CLOSED`, from the
+  published date only — `UNKNOWN` when the posting has none.
+- **Dedup:** identity ignores tracking parameters (`utm_*`, `gclid`, …), `www.`, fragments and trailing
+  slashes; the same job on a company page and a board merges into one record with alternate sources.
+- **Source health** (`tracking/source_health.csv`, new `health_state` column): VERIFIED / PARTIAL /
+  BLOCKED / AUTH_REQUIRED / BROWSER_REQUIRED / PARSER_FAILED / RATE_LIMITED / UNAVAILABLE / UNKNOWN,
+  with last attempt/success, HTTP status, result count and a cooldown. Refusals (403/401/429) are never
+  retried; only timeouts/5xx are, a bounded number of times. Cooldowns (`source_policy` in
+  `config/search_matrix.yaml`): BLOCKED/AUTH_REQUIRED 24h, RATE_LIMITED 1h, PARSER_FAILED 6h,
+  UNAVAILABLE 15 min doubling — always expiring, so no source is dropped for good.
+- **Regional search:** `target_locations` tiers split the discovery-query budget Saudi Arabia 5 :
+  UAE 4 : Qatar 3 : Egypt 2 : Global/remote 2, with core BIM roles first (`role_query_matrix`), one role per
+  query, and mode terms from `config/career_state.yaml` (`query_terms`, `remote_only_locations`).
+- **Budget:** `search_limits` plus `acquisition_budget` (`max_company_pages_per_run`,
+  `max_search_page_fetches`). The search provider and each company site are capped at
+  `max_requests_per_source` requests per run.
+- AI is never called during acquisition; existing tiers decide later analysis. Nothing is ever
+  applied for automatically.
+
+```bash
+python career_hunter.py sources          # registry: implementation + capabilities + credentials
+python career_hunter.py source-health    # health state, last success, failures, cooldowns
+python career_hunter.py research-status  # recent research runs
+python career_hunter.py research --dry-run   # routing, company pages, queries, max requests — no request, no write
+python career_hunter.py research             # live cycle
+```
+
+To enable live acquisition in a cloud session, allow the hosts in the environment's network settings
+(see docs/PRODUCTION_READINESS.md, Phase 5); to enable search discovery, set `BRAVE_SEARCH_API_KEY` as
+an environment variable — never in a file.
+
 **Phase 4.2 additions (Opportunity Intelligence & Multi-Mode Resolution):** one job can belong
 to several modes but is always **one** canonical record. Each opportunity gets:
 

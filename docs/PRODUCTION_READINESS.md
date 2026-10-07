@@ -975,3 +975,80 @@ with old rows preserved. Old snapshots and research-run JSON (no `mode` key) loa
   Remote OK and Remotive and got `403 Forbidden` from the sandbox egress proxy, as in every prior
   phase. 0 opportunities were found and none were fabricated, so multi-mode behavior on live jobs
   is unverified; it is covered only by synthetic `TEST_FIXTURE` records inside the tests.
+
+---
+
+## PHASE 8 — Live Opportunity Acquisition & Source Expansion
+
+(Called "Phase 5" in the task prompt.) Field-level details are in README "Phase 5 additions".
+
+### Audit — what existed
+
+Adapters for Remote OK / Remotive (never once reachable from this sandbox), a company career-page
+adapter that only fetched raw HTML (no parser), an empty company CSV, a `WebSearchProvider`
+interface with no real provider, 5-state source health with no cooldown, HTTP helpers that retried
+every failure (including 403s — Remotive was hit 5 times per run), and Phase 4.2 identity/modes.
+
+### What was built (extending, not replacing)
+
+| Area | Change |
+|---|---|
+| HTTP | `sources.base.http_fetch` returns the status code; only timeouts/5xx are retried. Remotive stops after a refusal. |
+| Source health | `health_state` + `last_attempt`, `http_status`, `last_result_count`, `cooldown_until`; exponential/capped cooldowns; cooldown runs leave the last real outcome intact. The original `status` column is unchanged. |
+| Registry | `scripts/lib/source_registry.py` derives implementation status and capabilities from `config/sources.yaml` + real code; `search_providers` section added. |
+| Career pages | `scripts/web/jobposting_parser.py` (JSON-LD JobPosting, closure detection, same-site job links) used by `company_careers.py`; `config/target_companies.yaml` registry; per-company cooldown and budget. |
+| Search | `scripts/web/brave_search.py` (real provider, key from env only) + `scripts/web/search_discovery.py` (lead → fetched page → JobPosting). |
+| Queries | `search_config.build_search_engine_queries()` — regional tiers, role matrix, mode terms. |
+| Data | `freshness`, `job_page_url`, `application_url`, `company_career_url`, `closing_date`; URL canonicalization in identity; new `jobs.csv` columns appended. |
+| Pipeline/CLI | Company pages + search discovery run inside `research`; dry-run shows the full plan with no request and no write; `sources`, `source-health`, `research-status`; report sections SEARCH, ACTION REQUIRED, persistent SOURCE HEALTH. |
+
+### Live validation (2026-10-07) — what was and was not verified
+
+- **BLOCKED (verified live, real outcome):** a full `python career_hunter.py research` attempted 11 real
+  hosts — `remoteok.com`, `remotive.com`, and the 9 registry career sites — and every one was refused by
+  the sandbox egress proxy (`403` on CONNECT). The proxy log confirms exactly one attempt per host after
+  the retry fix. 0 jobs found, 0 invented. A second run made 0 requests (all in cooldown).
+  A wider probe of 29 hosts (Greenhouse/Lever/SmartRecruiters/Ashby/Workable ATS APIs, Arbeitnow, Jobicy,
+  Himalayas, SerpAPI/Bing/Tavily/Brave endpoints, DuckDuckGo, Google, Bayt, GulfTalent, Naukrigulf,
+  Indeed, LinkedIn, ArchDaily, We Work Remotely, company sites) was refused the same way, while
+  `pypi.org` returned 200 — the block is the environment's network policy, not the code.
+- **AUTH_REQUIRED:** Brave Search API — `BRAVE_SEARCH_API_KEY` not set; no request made.
+- **NOT IMPLEMENTED:** SerpAPI, Bing, Tavily (declared only).
+- **BROWSER_REQUIRED:** LinkedIn, Glassdoor, Upwork (browser queue, human-in-the-loop).
+- **SEARCH_INDEXED, not live-verified:** the 9 company career URLs. They were found by a web search
+  restricted to each company's own domain (a server-side search tool, not this container's network);
+  none has been fetched by Career Hunter yet.
+- **Verified only with mocked HTTP:** the JSON-LD parser, career-page link following, Brave response
+  parsing and discovery. The Brave response shape is the documented one but has never been exercised
+  against the real API.
+
+### How to unblock live acquisition
+
+1. In the cloud environment's settings (environment menu in the session title bar → Edit → Network
+   access), choose a broader access level, or Custom and add the needed hosts — e.g. `remotive.com`,
+   `remoteok.com`, `api.search.brave.com`, and the career hosts in `config/target_companies.yaml`
+   (`careers.neom.com`, `redseaglobal.com`, `www.roshn.sa`, `www.dar.com`, `careers.khatibalami.com`,
+   `www.aldar.com`, `careers.atkinsrealis.com`, `www.qataridiar.com`, `www.gensler.com`). Steps:
+   https://code.claude.com/docs/en/cloud-environments#network-access. Or run Career Hunter locally.
+2. Set `BRAVE_SEARCH_API_KEY` as an environment variable/secret (never in a file).
+3. Clear stale cooldowns if needed (`tracking/source_health.csv` `cooldown_until`) and run
+   `python career_hunter.py research`, then `python career_hunter.py source-health`.
+
+### Known limits
+
+- Many careers sites render jobs with JavaScript or host them on an ATS on another domain (Workday,
+  Oracle, SuccessFactors). Same-site link following will then find no JobPosting → `FETCHED_UNPARSED`
+  (PARTIAL), and the page goes to manual review. ATS-specific adapters are the next step once real
+  responses can be observed.
+- No Egypt (tier 4) company is seeded; Diriyah, AECOM and Zaha Hadid need a human-verified URL.
+- Company intelligence for high-priority jobs reuses the existing analyzer; no new web research for
+  companies was added (it would be unverifiable here).
+- PUBLIC_WEB boards (Indeed, Bayt, GulfTalent, …) remain raw-fetch-only with no parser.
+
+### Readiness
+
+- Engineering readiness: ~85% — acquisition, verification, health/backoff, budget and dedup are
+  implemented and tested (439 tests); the gaps are ATS-specific adapters and real-response tuning.
+- Live acquisition readiness: ~15% — no live job has ever been acquired; every live source is blocked
+  or lacks credentials in this environment, and the career URLs are search-indexed, not fetched.
+- Overall: ~55%.

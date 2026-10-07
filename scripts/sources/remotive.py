@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.lib import config as cfg_lib  # noqa: E402
-from scripts.sources.base import SourceAdapter, SourceRunResult, http_get_json  # noqa: E402
+from scripts.sources.base import SourceAdapter, SourceRunResult, _is_retryable, http_get_json  # noqa: E402
 
 API_URL = "https://remotive.com/api/remote-jobs"
 DEFAULT_SEARCH_TERMS = ["BIM", "Revit", "Architect", "Interior Designer", "Architectural"]
@@ -49,10 +49,14 @@ class RemotiveAdapter(SourceAdapter):
         last_error = None
         any_success = False
 
+        requests_made = 0
         for term in search_terms:
             data, error = http_get_json(f"{API_URL}?search={urllib_quote(term)}", timeout=10, retries=2)
+            requests_made += 1
             if error:
                 last_error = error
+                if not _is_retryable(None, error):
+                    break  # refused (403/401/429): every further term would be refused too — stop (Phase 5 §29)
                 continue
             any_success = True
             for job in (data or {}).get("jobs", []):
@@ -61,7 +65,7 @@ class RemotiveAdapter(SourceAdapter):
                     all_jobs[job_id] = job
 
         if not any_success:
-            return SourceRunResult(source=self.name, status="UNAVAILABLE", error=last_error)
+            return SourceRunResult(source=self.name, status="UNAVAILABLE", error=last_error, requests_made=requests_made)
 
         jobs = list(all_jobs.values())
         if limit:

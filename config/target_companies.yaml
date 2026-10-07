@@ -1,0 +1,138 @@
+# Target-company registry (Phase 5) — read by scripts/sources/company_careers.py.
+#
+# REAL entries, not examples. Every career_url below was found through a web
+# search restricted to the company's OWN domain on 2026-10-07; none was
+# typed from memory or composed to "look plausible".
+#
+# url_verification.status:
+#   SEARCH_INDEXED  URL appears in a search index under the company's own
+#                   domain. NOT fetched by this system: this sandbox's network
+#                   policy refuses outbound connections to these hosts, so no
+#                   entry here is LIVE_VERIFIED yet. The first successful fetch
+#                   is recorded in tracking/company_career_pages.csv (last_status).
+#   UNVERIFIED      no official careers URL could be confirmed -> career_url is
+#                   UNKNOWN, the entry is disabled, and the browser queue gets a
+#                   VERIFY_COMPANY_CAREER_URL task for a human. Never guessed.
+#
+# regions use config/search_matrix.yaml target_locations region keys.
+# priority (HIGH/MEDIUM/LOW) is a human judgement of fit; HIGH is checked first.
+
+companies:
+  # --- Tier 1: Saudi Arabia ---------------------------------------------------
+  - company: NEOM
+    regions: [SAUDI_ARABIA]
+    source_type: developer_giga_project
+    career_url: https://careers.neom.com/careers
+    url_verification: {status: SEARCH_INDEXED, method: web_search_own_domain, checked_at: "2026-10-07"}
+    priority: HIGH
+    target_roles: [BIM Architect, BIM Coordinator, Architect, BIM Manager]
+    enabled: true
+
+  - company: Red Sea Global
+    regions: [SAUDI_ARABIA]
+    source_type: developer_giga_project
+    career_url: https://redseaglobal.com/en/job-application
+    url_verification: {status: SEARCH_INDEXED, method: web_search_own_domain, checked_at: "2026-10-07"}
+    priority: HIGH
+    target_roles: [BIM Architect, BIM Coordinator, Architect, Design Coordinator]
+    enabled: true
+
+  - company: ROSHN
+    regions: [SAUDI_ARABIA]
+    source_type: developer
+    career_url: https://www.roshn.sa/careers
+    url_verification: {status: SEARCH_INDEXED, method: web_search_own_domain, checked_at: "2026-10-07"}
+    priority: HIGH
+    target_roles: [BIM Architect, BIM Coordinator, Architect, Design Coordinator]
+    enabled: true
+
+  - company: Dar Al-Handasah
+    regions: [SAUDI_ARABIA, UAE, QATAR, EGYPT, GLOBAL]
+    source_type: engineering_consultancy
+    career_url: https://www.dar.com/Careers/OpenPositions
+    url_verification: {status: SEARCH_INDEXED, method: web_search_own_domain, checked_at: "2026-10-07"}
+    priority: HIGH
+    target_roles: [BIM Architect, BIM Coordinator, Revit Architect, Architect, BIM Modeler]
+    enabled: true
+
+  - company: Khatib & Alami
+    regions: [SAUDI_ARABIA, UAE, QATAR, GLOBAL]
+    source_type: engineering_consultancy
+    career_url: https://careers.khatibalami.com/
+    url_verification: {status: SEARCH_INDEXED, method: web_search_own_domain, checked_at: "2026-10-07"}
+    priority: HIGH
+    target_roles: [BIM Architect, BIM Coordinator, Architect, Interior Architect]
+    enabled: true
+
+  - company: Diriyah Company
+    regions: [SAUDI_ARABIA]
+    source_type: developer_giga_project
+    career_url: UNKNOWN
+    url_verification: {status: UNVERIFIED, method: web_search_own_domain, checked_at: "2026-10-07",
+                       note: "No careers page found on diriyah.sa in search results."}
+    priority: HIGH
+    target_roles: [BIM Architect, BIM Coordinator, Architect]
+    enabled: false
+
+  # --- Tier 2: UAE --------------------------------------------------------------
+  - company: Aldar
+    regions: [UAE]
+    source_type: developer
+    career_url: https://www.aldar.com/en/careers
+    url_verification: {status: SEARCH_INDEXED, method: web_search_own_domain, checked_at: "2026-10-07"}
+    priority: MEDIUM
+    target_roles: [BIM Coordinator, Architect, Design Coordinator]
+    enabled: true
+
+  - company: AtkinsRéalis
+    regions: [UAE, SAUDI_ARABIA, QATAR, GLOBAL]
+    source_type: engineering_consultancy
+    career_url: https://careers.atkinsrealis.com/en
+    url_verification: {status: SEARCH_INDEXED, method: web_search_own_domain, checked_at: "2026-10-07"}
+    priority: MEDIUM
+    target_roles: [BIM Architect, BIM Coordinator, BIM Specialist, Architect]
+    enabled: true
+
+  - company: AECOM
+    regions: [UAE, SAUDI_ARABIA, QATAR, GLOBAL]
+    source_type: engineering_consultancy
+    career_url: UNKNOWN
+    url_verification: {status: UNVERIFIED, method: web_search_own_domain, checked_at: "2026-10-07",
+                       note: "Only recruitment/FAQ pages on aecom.com were indexed, no job-listing URL."}
+    priority: MEDIUM
+    target_roles: [BIM Architect, BIM Coordinator, Architect]
+    enabled: false
+
+  # --- Tier 3: Qatar ------------------------------------------------------------
+  - company: Qatari Diar
+    regions: [QATAR]
+    source_type: developer
+    career_url: https://www.qataridiar.com/careers
+    url_verification: {status: SEARCH_INDEXED, method: web_search_own_domain, checked_at: "2026-10-07",
+                       note: "Page states CVs are sent by email; it may list no individual vacancies."}
+    priority: MEDIUM
+    target_roles: [Architect, BIM Coordinator]
+    enabled: true
+
+  # --- Tier 5: Global -----------------------------------------------------------
+  - company: Gensler
+    regions: [GLOBAL, UAE]
+    source_type: architecture_firm
+    career_url: https://www.gensler.com/how-to-apply
+    url_verification: {status: SEARCH_INDEXED, method: web_search_own_domain, checked_at: "2026-10-07",
+                       note: "Apply-entry page; individual jobs are indexed under talent.gensler.com."}
+    priority: LOW
+    target_roles: [Architect, Design Architect, Technical Architect, Interior Designer]
+    enabled: true
+
+  - company: Zaha Hadid Architects
+    regions: [GLOBAL]
+    source_type: architecture_firm
+    career_url: UNKNOWN
+    url_verification: {status: UNVERIFIED, method: web_search_own_domain, checked_at: "2026-10-07",
+                       note: "No careers URL on zaha-hadid.com appeared in search results."}
+    priority: LOW
+    target_roles: [Architect, Design Architect, BIM Coordinator]
+    enabled: false
+
+# Tier 4 (Egypt): no company seeded yet — none was verified this phase.

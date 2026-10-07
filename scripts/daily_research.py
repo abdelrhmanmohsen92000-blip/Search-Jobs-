@@ -36,6 +36,10 @@ from scripts.intelligence.application_strategy import combined_portfolio_evidenc
 from scripts.intelligence.ai_provider import tier_for_score  # noqa: E402
 from scripts.intelligence import opportunity_priority  # noqa: E402
 from scripts.lib import opportunity_modes  # noqa: E402
+from scripts.lib import career_state as career_state_lib, source_registry, staleness  # noqa: E402
+from scripts.sources import company_careers  # noqa: E402
+from scripts.web import search_discovery  # noqa: E402
+from scripts.web.brave_search import BraveSearchProvider  # noqa: E402
 
 DEFAULT_SUB_SCORES = {  # neutral defaults when a raw record has no explicit scoring input
     "technical": 5, "experience": 5, "software": 5, "project": 5,
@@ -54,6 +58,9 @@ JOBS_FIELDNAMES = [
     "matched_modes", "discovered_via_modes", "primary_mode", "mode_priority_score",
     "career_priority_score", "career_priority", "exceptional_opportunity", "exceptional_reasons",
     "sub_scores_explicit", "alternate_source_urls",
+    # Phase 5 — provenance, URL roles and freshness (appended; older rows read back blank/UNKNOWN).
+    "date_posted", "closing_date", "freshness", "lifecycle_status", "job_page_url", "application_url",
+    "company_career_url", "retrieved_at", "extraction_method", "confidence_score",
 ]
 
 # Columns that hold evidence/identity: on re-discovery an existing non-empty
@@ -63,7 +70,8 @@ _EVIDENCE_COLUMNS = (
     "id", "date_found", "source", "source_url", "job_title", "company", "country", "city", "region", "remote",
     "employment_type", "required_experience", "skills_required", "software_required", "project_types",
     "visa_sponsorship", "salary_min", "salary_max", "salary_currency", "salary_period", "salary_source",
-    "salary_confidence",
+    "salary_confidence", "date_posted", "closing_date", "job_page_url", "application_url",
+    "company_career_url", "retrieved_at", "extraction_method",
 )
 _UNION_COLUMNS = ("matched_modes", "discovered_via_modes", "exceptional_reasons", "alternate_source_urls")
 
@@ -117,6 +125,16 @@ def opportunity_to_jobs_row(o):
         "sub_scores_explicit": sr.get("sub_scores_explicit"),
         "alternate_source_urls": opportunity_modes.serialize_list(
             a.get("source_url") for a in (o.get("alternate_sources") or []) if a.get("source_url")),
+        "date_posted": o.get("date_posted") or "",
+        "closing_date": o.get("closing_date") or "",
+        "freshness": o.get("freshness") or "UNKNOWN",
+        "lifecycle_status": o.get("lifecycle_status") or "",
+        "job_page_url": o.get("job_page_url") or "",
+        "application_url": o.get("application_url") or "UNKNOWN",
+        "company_career_url": o.get("company_career_url") or "",
+        "retrieved_at": (o.get("provenance") or {}).get("retrieved_at") or "",
+        "extraction_method": (o.get("provenance") or {}).get("extraction_method") or "",
+        "confidence_score": o.get("confidence_score"),
     })
     return row
 
@@ -135,7 +153,7 @@ def _merge_jobs_row(existing, new, settings):
                     combined.append(v)
             merged[key] = opportunity_modes.serialize_list(combined)
         elif key in _EVIDENCE_COLUMNS:
-            if existing.get(key) in (None, ""):
+            if existing.get(key) in (None, "", "UNKNOWN"):
                 merged[key] = value
         elif value not in (None, ""):
             merged[key] = value
@@ -188,7 +206,7 @@ def upsert_jobs_rows(rows, csv_path=None, settings=None):
     return inserted, updated
 
 
-def run_source_adapters(enabled_sources=None, limit_per_source=None):
+def run_source_adapters(enabled_sources=None, limit_per_source=None, health=None, extra_results=None):
     """RUN ENABLED SOURCE ADAPTERS -> COLLECT RAW RESULTS.
 
     enabled_sources: optional list of source names to restrict to (--source).
@@ -205,6 +223,14 @@ def run_source_adapters(enabled_sources=None, limit_per_source=None):
     for name, adapter in SOURCE_REGISTRY.items():
         if enabled_sources and name not in enabled_sources:
             continue
+        if health is not None and source_health_lib.in_cooldown(health.get(name)):
+            source_health.append({  # Phase 5: inside a backoff window — not requested, not a new failure
+                "source": name, "status": "COOLDOWN", "error": None, "opportunities": [], "raw_count": 0,
+                "notes": f"Skipped until {health[name].get('cooldown_until')} (last state "
+                         f"{health[name].get('health_state') or health[name].get('status')}).",
+                "attempted_at": _dt.datetime.now().isoformat(timespec="seconds"),
+            })
+            continue
         try:
             result = adapter.fetch(limit=limit_per_source)
         except Exception as e:  # noqa: BLE001 - one source's bug must never kill the cycle
@@ -218,6 +244,9 @@ def run_source_adapters(enabled_sources=None, limit_per_source=None):
         source_health.append(result.to_dict())
         raw_records.extend(result.opportunities)
 
+    for extra in extra_results or []:  # Phase 5: company pages / search provider results
+        source_health.append(extra)
+
     # Sources we know about but don't run automatically every cycle
     # (BROWSER_REQUIRED boards, and PUBLIC_WEB boards needing a per-query
     # target) are still reported so SOURCE HEALTH never hides them.
@@ -225,16 +254,10 @@ def run_source_adapters(enabled_sources=None, limit_per_source=None):
         name = src.get("name")
         if any(h["source"] == name for h in source_health):
             continue
-        if src.get("enabled") is False:
-            status = "DISABLED"
-        elif src.get("access_method") == "BROWSER_REQUIRED":
-            status = "BROWSER_REQUIRED"
-        elif src.get("access_method") == "MANUAL":
-            status = "MANUAL"
-        else:
-            status = "NOT_RUN_THIS_CYCLE"
+        status = source_registry.unattempted_status(src)
+        error = (f"{src['credential_env']} is not set" if status == "AUTH_REQUIRED" else None)
         source_health.append({
-            "source": name, "status": status, "error": None, "opportunities": [], "raw_count": 0,
+            "source": name, "status": status, "error": error, "opportunities": [], "raw_count": 0,
             "notes": f"access_method={src.get('access_method', 'UNKNOWN')}",
             "attempted_at": _dt.datetime.now().isoformat(timespec="seconds"),
         })
@@ -286,6 +309,8 @@ def normalize_and_score(raw_records, profile=None, discovered_via_mode=None, set
         sub_scores = opp.pop("_sub_scores", None) or DEFAULT_SUB_SCORES
         result = scoring.score_opportunity_record(opp, sub_scores, profile=profile)
         result["sub_scores_explicit"] = explicit_sub_scores
+        opp["lifecycle_status"] = opp.get("lifecycle_status") or staleness.compute_lifecycle_status(opp)
+        opp["freshness"] = staleness.compute_freshness(opp)  # Phase 5: from a published date only
         opp["match_score"] = result["score"]
         opp["priority"] = result["priority"]
         opp["reason"] = "; ".join(result["strengths"][:2]) or "Scored with neutral default sub-scores (no explicit assessment provided)."
@@ -356,6 +381,23 @@ def market_intelligence(scored):
     }
 
 
+def _portfolio_strength(opp):
+    """Summary label straight from the evidence hierarchy — never upgraded."""
+    summary = opp.get("portfolio_evidence_summary")
+    if not isinstance(summary, dict):
+        return "Insufficient data"
+    direct = summary.get("direct_project_matches") or []
+    if any(m.get("relevance") == "HIGH" for m in direct):
+        return "Strong (direct project evidence)"
+    if direct:
+        return "Direct project evidence"
+    if summary.get("profile_capability_matches"):
+        return "Capability-level only"
+    if summary.get("regional_matches"):
+        return "Regional only"
+    return "None"
+
+
 def _opportunity_block(opp, n, show_exceptional=False):
     sr = opp.get("scoring_result", {})
     modes = opp.get("matched_modes") or []
@@ -365,7 +407,10 @@ def _opportunity_block(opp, n, show_exceptional=False):
         f" (career priority score {opp.get('career_priority_score')})",
         f"   - {'Modes' if len(modes) > 1 else 'Mode'}: {opportunity_priority.mode_label(opp)}"
         f"   Primary mode: {opp.get('primary_mode') or 'UNKNOWN'}",
-        f"   - Country: {opp.get('country') or 'n/a'}   Action: {sr.get('action')}",
+        f"   - {', '.join(x for x in (opp.get('city'), opp.get('country')) if x) or 'Location UNKNOWN'}"
+        f"{' | Remote' if opp.get('remote') else ''} | Freshness: {opp.get('freshness') or 'UNKNOWN'}"
+        f" | Source: {opp.get('source')} | Portfolio: {_portfolio_strength(opp)}",
+        f"   - Action: {sr.get('action')}   Apply: {opp.get('application_url') or 'UNKNOWN'}",
     ]
     if show_exceptional:
         lines.append(f"   - Exceptional: YES — {'; '.join(opp.get('exceptional_explanations') or opp.get('exceptional_reasons') or [])}")
@@ -414,6 +459,66 @@ def opportunity_intelligence_lines(scored, settings=None, limit=10):
     return lines
 
 
+_STATE_ORDER = ("VERIFIED", "PARTIAL", "RATE_LIMITED", "UNAVAILABLE", "PARSER_FAILED", "BLOCKED",
+                "AUTH_REQUIRED", "BROWSER_REQUIRED", "UNKNOWN")
+
+
+def search_mode_lines(run_mode=None):
+    """Which career modes are active, which ran this cycle, which are due."""
+    state = career_state_lib.load_career_state()
+    runs = career_state_lib.load_mode_runs()
+    active = career_state_lib.active_modes(state)
+    due = {m["name"] for m in career_state_lib.due_modes(active, runs=runs)}
+    lines = ["## SEARCH", "", f"Current goal: {state.get('current_primary_goal') or 'UNKNOWN'}", ""]
+    for m in active:
+        if m["name"] == run_mode:
+            mark, note = "✓", "searched this run"
+        elif m["name"] in due:
+            mark, note = "○", "due — not run this cycle"
+        else:
+            mark, note = "○", f"last run {runs.get(m['name'])}"
+        lines.append(f"- {mark} {m['name']} ({m['priority']}, {m['frequency']}) — {note}")
+    disabled = [n for n, c in (state.get("search_modes") or {}).items() if not (c or {}).get("enabled")]
+    if disabled:
+        lines.append(f"- disabled: {', '.join(disabled)}")
+    return lines + [""]
+
+
+def action_required_lines(scored):
+    """Counts straight from this cycle's evaluated opportunities — no estimates."""
+    actions = collections.Counter((o.get("scoring_result") or {}).get("action") for o in scored)
+    exceptional = sum(1 for o in scored if o.get("exceptional_opportunity"))
+    closed = sum(1 for o in scored if o.get("freshness") == "CLOSED")
+    no_apply_url = sum(1 for o in scored if (o.get("application_url") or "UNKNOWN") == "UNKNOWN")
+    unverified_companies = len(company_careers.unverified_targets(company_careers.load_targets()))
+    return ["## ACTION REQUIRED", "",
+            f"- {actions.get('APPLY_NOW', 0) + actions.get('APPLY', 0)} opportunities ready to apply (APPLY_NOW/APPLY)",
+            f"- {actions.get('NETWORK_FIRST', 0)} need networking/company research first (NETWORK_FIRST)",
+            f"- {exceptional} exceptional opportunit{'y' if exceptional == 1 else 'ies'} to review",
+            f"- {no_apply_url} without a known application URL (open the job page to find it)",
+            f"- {closed} closed by explicit evidence (kept for history)",
+            f"- {unverified_companies} target companies need a verified careers URL (browser queue)",
+            "", "_Nothing is applied for automatically — every application needs your approval._", ""]
+
+
+def source_health_lines(run_health):
+    """This run's outcome per source plus the persistent health history, so
+    a failure is never hidden behind a quiet run."""
+    persistent = source_health_lib.load_health()
+    lines = ["## SOURCE HEALTH", "", "| Source | This run | Health | Last success | Consecutive failures | Cooldown until | Error |",
+             "|---|---|---|---|---|---|---|"]
+    run_status = {h["source"]: h["status"] for h in run_health}
+    names = sorted(set(run_status) | set(persistent), key=lambda n: (
+        _STATE_ORDER.index((persistent.get(n) or {}).get("health_state") or "UNKNOWN")
+        if ((persistent.get(n) or {}).get("health_state") or "UNKNOWN") in _STATE_ORDER else 99, n))
+    for name in names:
+        row = persistent.get(name) or {}
+        lines.append(f"| {name} | {run_status.get(name, '-')} | {row.get('health_state') or 'UNKNOWN'} | "
+                     f"{row.get('last_success') or '-'} | {row.get('consecutive_failures') or 0} | "
+                     f"{row.get('cooldown_until') or '-'} | {(row.get('error_detail') or '-')[:80]} |")
+    return lines + [""]
+
+
 def generate_daily_report(scored, rejected, duplicates, stats, query_summary, source_health,
                            application_plans, out_path=None):
     out_path = out_path or (paths.REPORTS_DIR / "daily_report.md")
@@ -424,6 +529,7 @@ def generate_daily_report(scored, rejected, duplicates, stats, query_summary, so
     freelance = [o for o in scored if (o.get("employment_type") or "").lower() in ("freelance", "contract", "project-based")]
 
     lines = ["# Career Hunter Daily Intelligence", f"**Date:** {today}", ""]
+    lines += search_mode_lines(stats.get("career_mode")) + action_required_lines(scored)
 
     lines += ["## Executive Summary", ""]
     live_sources = ", ".join(stats["sources_successful"]) or "none"
@@ -500,11 +606,7 @@ def generate_daily_report(scored, rejected, duplicates, stats, query_summary, so
     lines.append("**Emerging demand:** " + (", ".join(t for t, _ in mi["best_titles"][:3]) or "insufficient data yet"))
     lines.append("")
 
-    lines += ["## SOURCE HEALTH", "", "| Source | Status | Results | Errors |", "|---|---|---|---|"]
-    for h in source_health:
-        lines.append(f"| {h['source']} | {h['status']} | {len(h.get('opportunities', [])) or h.get('raw_count', 0)} "
-                      f"| {h.get('error') or '-'} |")
-    lines.append("")
+    lines += source_health_lines(source_health)
 
     tb = stats.get("ai_tier_breakdown", {})
     lines += ["## AI ANALYSIS", "",
@@ -553,6 +655,122 @@ def generate_daily_report(scored, rejected, duplicates, stats, query_summary, so
     return out_path
 
 
+COMPANY_PAGES_SOURCE = "Official company career pages"
+
+
+def _mode_config(mode_name):
+    """The career-state mode entry used to shape discovery queries: the run's
+    mode, else the current primary goal's mode, else none."""
+    state = career_state_lib.load_career_state()
+    name = mode_name or state.get("current_primary_goal")
+    return next((m for m in career_state_lib.active_modes(state) if m["name"] == name), None)
+
+
+def run_company_pages(health=None, limits=None):
+    """Phase 5 priority-1 source: verified company career pages (tracking CSV
+    + config/target_companies.yaml), HIGH priority first, within budget.
+    Returns (raw_records, health_results) — one health row per company plus an
+    aggregate row for the 'Official company career pages' source."""
+    limits = limits or cfg_lib.acquisition_limits()
+    results = company_careers.run_configured_company_sources(
+        limit=limits["max_company_pages_per_run"], targets=company_careers.load_targets(), health=health,
+        max_requests=limits["max_requests_per_source"])
+    raw, rows = [], []
+    for r in results:
+        rows.append(r.to_dict())
+        raw.extend(r.opportunities)
+    attempted = [r for r in results if r.status != "COOLDOWN"]
+    if not results:
+        return raw, rows
+    if any(r.status == "SUCCESS" for r in attempted):
+        status, error = "SUCCESS", None
+    elif any(r.status in ("FETCHED_UNPARSED", "PARSE_ERROR") for r in attempted):
+        status, error = "FETCHED_UNPARSED", None
+    elif attempted:
+        status, error = "UNAVAILABLE", "; ".join(sorted({r.error for r in attempted if r.error}))[:300]
+    else:
+        status, error = "COOLDOWN", None
+    rows.append({"source": COMPANY_PAGES_SOURCE, "status": status, "error": error, "opportunities": [],
+                 "raw_count": len(raw), "notes": f"{len(attempted)} career site(s) attempted, "
+                 f"{len(results) - len(attempted)} in cooldown", "requests_made": sum(r.requests_made for r in results),
+                 "attempted_at": _dt.datetime.now().isoformat(timespec="seconds")})
+    return raw, rows
+
+
+def run_search_provider(mode_name=None, health=None, limits=None, provider=None):
+    """Phase 5 search-engine discovery. Returns (raw_records, health_results, stats).
+    No credentials -> one AUTH_REQUIRED row, no request made."""
+    limits = limits or cfg_lib.acquisition_limits()
+    provider = provider or BraveSearchProvider()
+    if not provider.configured:
+        return [], [], {"status": "AUTH_REQUIRED"}
+    if health is not None and source_health_lib.in_cooldown(health.get(provider.name)):
+        return [], [{"source": provider.name, "status": "COOLDOWN", "error": None, "opportunities": [],
+                     "raw_count": 0, "notes": "Skipped: inside source-health backoff window."}], {"status": "COOLDOWN"}
+    queries = search_config.build_search_engine_queries(_mode_config(mode_name),
+                                                        limit=limits["max_requests_per_source"])
+    outcome = search_discovery.run_search_discovery(provider, queries, limits["max_results_per_query"],
+                                                    limits["max_search_page_fetches"])
+    raw_status = {"LIVE": "SUCCESS", "EMPTY": "EMPTY", "PARSER_FAILED": "PARSE_ERROR",
+                  "AUTH_REQUIRED": "AUTH_REQUIRED"}.get(outcome["status"], "UNAVAILABLE")
+    last_error = next((r.error for r in reversed(outcome["provider_results"]) if r.error), None)
+    if outcome["status"] == "BLOCKED" and last_error and "403" not in last_error:
+        last_error = f"HTTP 403: {last_error}"
+    row = {"source": provider.name, "status": raw_status, "error": last_error if raw_status != "SUCCESS" else None,
+           "opportunities": [], "raw_count": len(outcome["opportunities"]),
+           "http_status": 429 if outcome["status"] == "RATE_LIMITED" else None,
+           "requests_made": outcome["stats"]["queries_executed"] + outcome["stats"]["pages_fetched"],
+           "notes": f"{outcome['stats']}", "attempted_at": _dt.datetime.now().isoformat(timespec="seconds")}
+    return outcome["opportunities"], [row], {"status": outcome["status"], **outcome["stats"]}
+
+
+def build_acquisition_plan(mode=None, source_filter=None, health=None):
+    """What a live run would do — computed from config + persisted source
+    health only. No network request, no write (used by --dry-run)."""
+    limits = cfg_lib.acquisition_limits()
+    health = health if health is not None else source_health_lib.load_health()
+    sources = []
+    for src in source_registry.list_sources():
+        row = health.get(src["name"]) or {}
+        if source_filter and src["name"] != source_filter:
+            continue
+        if src["implementation"] in ("ADAPTER", "CAREER_PAGES", "SEARCH_PROVIDER", "MANUAL_IMPORT"):
+            if src["credential_env"] and not src["credential_present"]:
+                planned = "AUTH_REQUIRED (no request)"
+            elif source_health_lib.in_cooldown(row):
+                planned = f"COOLDOWN until {row.get('cooldown_until')}"
+            elif not src["enabled"]:
+                planned = "DISABLED"
+            else:
+                planned = "WILL_REQUEST"
+        elif src["implementation"] == "BROWSER_QUEUE":
+            planned = "BROWSER_REQUIRED (browser queue)"
+        elif src["implementation"] == "NOT_IMPLEMENTED":
+            planned = "NOT_IMPLEMENTED"
+        else:
+            planned = f"{src['implementation']} (not auto-run)"
+        sources.append({"source": src["name"], "implementation": src["implementation"], "planned": planned,
+                        "last_health_state": row.get("health_state") or "UNKNOWN"})
+    targets = company_careers.load_targets()
+    _, to_check, cooled = company_careers.plan_company_sources(
+        limit=limits["max_company_pages_per_run"], targets=targets, health=health)
+    run_company = not source_filter or source_filter == COMPANY_PAGES_SOURCE
+    provider = BraveSearchProvider()
+    queries = search_config.build_search_engine_queries(_mode_config(mode), limit=limits["max_requests_per_source"])
+    return {
+        "sources": sources,
+        "company_pages": {"to_check": [r["company"] for r in to_check] if run_company else [],
+                          "in_cooldown": [r["company"] for r in cooled],
+                          "needs_url_verification": [t["company"] for t in company_careers.unverified_targets(targets)]},
+        "search_provider": {"name": provider.name,
+                            "status": "WILL_REQUEST" if provider.configured else "AUTH_REQUIRED (no request)",
+                            "queries": [q["query_string"] for q in queries]},
+        "max_expected_requests": {
+            "company_pages": len(to_check) * limits["max_requests_per_source"] if run_company else 0,
+            "search_provider": (len(queries) + limits["max_search_page_fetches"]) if provider.configured else 0},
+    }
+
+
 def run(region=None, remote=False, freelance=False, source_filter=None, limit=None, dry_run=False,
         employment_types=None, mode=None):
     """mode/employment_types (Phase 4.1 Career Search Modes Engine): an
@@ -570,11 +788,25 @@ def run(region=None, remote=False, freelance=False, source_filter=None, limit=No
     )
     query_summary = search_config.summarize_plan(query_plan)
 
-    if dry_run:
-        return {"dry_run": True, "query_summary": query_summary, "query_plan_sample": query_plan[:10], "mode": mode}
+    if dry_run:  # no network request and no write — the plan is computed from config + stored health
+        return {"dry_run": True, "query_summary": query_summary, "query_plan_sample": query_plan[:10], "mode": mode,
+                "acquisition_plan": build_acquisition_plan(mode, source_filter)}
+
+    health = source_health_lib.load_health()  # SOURCE HEALTH: cooldowns decide what is requested
+    extra_raw, extra_health, discovery_stats = [], [], {}
+    if not source_filter or source_filter == COMPANY_PAGES_SOURCE:  # priority 1: verified career pages
+        company_raw, company_health = run_company_pages(health)
+        extra_raw += company_raw
+        extra_health += company_health
+    if not source_filter or source_filter == BraveSearchProvider.name:  # search-engine discovery
+        search_raw, search_health, discovery_stats = run_search_provider(mode, health)
+        extra_raw += search_raw
+        extra_health += search_health
 
     enabled = [source_filter] if source_filter else None
-    raw_records, source_health = run_source_adapters(enabled_sources=enabled, limit_per_source=limit)  # RUN SOURCES / COLLECT
+    raw_records, source_health = run_source_adapters(enabled_sources=enabled, limit_per_source=limit,
+                                                     health=health, extra_results=extra_health)  # LIVE ACQUISITION
+    raw_records += extra_raw
     persistent_source_health = source_health_lib.update_source_health(source_health)  # cross-run health history
 
     settings = opportunity_priority.load_settings()
@@ -582,6 +814,9 @@ def run(region=None, remote=False, freelance=False, source_filter=None, limit=No
                                                        settings=settings)  # VALIDATE/NORMALIZE/MODES/DEDUP/SCORE/RANK
     stats = build_cycle_stats(raw_records, scored, rejected, duplicates, source_health)
     stats["career_mode"] = mode
+    stats["search_discovery"] = discovery_stats
+    stats["requests_made"] = sum(int(h.get("requests_made") or 0) for h in source_health
+                                 if h.get("source") != COMPANY_PAGES_SOURCE)
 
     storage.save_run_snapshot("processed", "daily_opportunities", scored)  # SAVE
 

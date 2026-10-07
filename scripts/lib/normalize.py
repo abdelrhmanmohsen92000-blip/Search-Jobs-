@@ -90,6 +90,11 @@ def normalize_opportunity(raw):
         "lifecycle_status": raw.get("lifecycle_status"),
         "alternate_sources": raw.get("alternate_sources") or [],
         "company_canonical": raw.get("company_canonical"),
+        # Phase 5 URL roles: never assumed identical to one another.
+        "job_page_url": raw.get("job_page_url"),
+        "application_url": raw.get("application_url") or "UNKNOWN",
+        "company_career_url": raw.get("company_career_url"),
+        "closing_date": raw.get("closing_date"),
     }
 
     if "_sub_scores" in raw:

@@ -24,7 +24,7 @@ _RATE_LIMIT_MARKERS = ("429", "rate limit", "too many requests")
 _TIMEOUT_MARKERS = ("timeout", "timed out")
 _NETWORK_MARKERS = ("urlerror", "connection", "connect_rejected", "dns", "name or service not known", "network")
 _AUTH_MARKERS = ("401", "unauthorized", "auth_required", "login required", "authentication")
-_PARSER_MARKERS = ("parseerror", "parse error", "jsondecodeerror", "htmlparse")
+_PARSER_MARKERS = ("parseerror", "parse error", "parser_error", "parser error", "jsondecodeerror", "htmlparse")
 _INVALID_RESPONSE_MARKERS = ("malformed", "invalid response", "unexpected format")
 
 

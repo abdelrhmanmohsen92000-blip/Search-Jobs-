@@ -94,6 +94,11 @@ DEFAULT_SEARCH_LIMITS = {
     "max_requests_per_source": 10,
 }
 
+DEFAULT_ACQUISITION_BUDGET = {
+    "max_company_pages_per_run": 25,
+    "max_search_page_fetches": 30,
+}
+
 
 def search_limits(matrix=None):
     """Phase 3 safety limits (config/search_matrix.yaml `search_limits`),
@@ -102,3 +107,10 @@ def search_limits(matrix=None):
     """
     matrix = matrix or load_search_matrix()
     return {**DEFAULT_SEARCH_LIMITS, **(matrix.get("search_limits") or {})}
+
+
+def acquisition_limits(matrix=None):
+    """Phase 5: search_limits() plus the live-acquisition budget
+    (config/search_matrix.yaml `acquisition_budget`)."""
+    matrix = matrix or load_search_matrix()
+    return {**search_limits(matrix), **DEFAULT_ACQUISITION_BUDGET, **(matrix.get("acquisition_budget") or {})}

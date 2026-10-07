@@ -170,3 +170,77 @@ search_limits:
   max_results_per_query: 20     # passed to each source adapter's fetch(limit=...)
   max_pages: 3                  # for a future paginated adapter — no current adapter paginates
   max_requests_per_source: 10   # caps how many individual HTTP calls one adapter makes per run (e.g. Remotive's per-search-term calls)
+                                # Phase 5: also caps search-provider queries and pages fetched per company careers site
+
+# Phase 5 live-acquisition budget (scripts.lib.config.acquisition_limits()).
+acquisition_budget:
+  max_company_pages_per_run: 25 # company career sites checked per run (HIGH priority first)
+  max_search_page_fetches: 30   # search-result pages fetched for verification per run
+
+# --- Phase 5: live acquisition policy ----------------------------------------
+# Backoff after a failed request (scripts/lib/source_health.py). Every window
+# expires, so a failing source is re-checked later, never dropped for good.
+# UNAVAILABLE (timeouts/5xx) doubles per consecutive failure, up to the cap.
+source_policy:
+  cooldown_minutes:
+    BLOCKED: 1440        # HTTP 403 / proxy refused the connection
+    AUTH_REQUIRED: 1440  # credentials missing or rejected
+    RATE_LIMITED: 60     # HTTP 429
+    PARSER_FAILED: 360
+    UNAVAILABLE: 15      # 15, 30, 60, ... minutes
+  max_cooldown_minutes: 1440
+
+# Regional targeting for search-engine / career-page discovery queries
+# (scripts.search_config.build_search_engine_queries). Lower tier = larger
+# share of the query budget. Not a filter: an opportunity found anywhere is
+# still normalized, scored and surfaced on its merits.
+target_locations:
+  - tier: 1
+    region: SAUDI_ARABIA
+    locations: ["Saudi Arabia", "Riyadh", "Jeddah"]
+    weight: 5
+  - tier: 2
+    region: UAE
+    locations: ["UAE", "Dubai", "Abu Dhabi"]
+    weight: 4
+  - tier: 3
+    region: QATAR
+    locations: ["Qatar", "Doha"]
+    weight: 3
+  - tier: 4
+    region: EGYPT
+    locations: ["Egypt", "Cairo"]
+    weight: 2
+  - tier: 5
+    region: GLOBAL
+    locations: ["remote"]
+    weight: 2
+
+# Role relevance for discovery queries, from profile/profile.md: core roles
+# are searched in every target location first; secondary/adjacent roles fill
+# the remaining budget. One role per query — never "Revit AND Navisworks AND ...".
+role_query_matrix:
+  core:
+    - BIM Architect
+    - BIM Coordinator
+    - Revit Architect
+    - Architectural BIM
+    - BIM Specialist
+    - BIM Engineer
+    - BIM Lead
+  secondary:
+    - Architect
+    - Technical Architect
+    - Design Architect
+    - Architectural Designer
+    - BIM Modeler
+    - BIM Manager
+    - BIM Consultant
+    - Revit Specialist
+    - Design Coordinator
+    - Technical Coordinator
+  adjacent:
+    - Interior Architect
+    - Interior Designer
+    - Exterior Designer
+    - Landscape Designer

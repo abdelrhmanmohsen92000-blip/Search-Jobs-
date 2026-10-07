@@ -52,10 +52,10 @@ class RemoteOKAdapter(SourceAdapter):
         data, error = http_get_json(API_URL, timeout=10, retries=2)
 
         if error:
-            return SourceRunResult(source=self.name, status="UNAVAILABLE", error=error)
+            return SourceRunResult(source=self.name, status="UNAVAILABLE", error=error, requests_made=1)
 
         if not isinstance(data, list):
-            return SourceRunResult(source=self.name, status="ERROR", error="Unexpected response shape (expected a list)")
+            return SourceRunResult(source=self.name, status="ERROR", error="Unexpected response shape (expected a list)", requests_made=1)
 
         jobs = [j for j in data if isinstance(j, dict) and j.get("id")]  # drop the legend row
         relevant = [j for j in jobs if _relevant(j, titles_lower)]
@@ -63,7 +63,7 @@ class RemoteOKAdapter(SourceAdapter):
             relevant = relevant[:limit]
 
         if not relevant:
-            return SourceRunResult(source=self.name, status="EMPTY", raw_count=len(jobs))
+            return SourceRunResult(source=self.name, status="EMPTY", raw_count=len(jobs), requests_made=1)
 
         opportunities = [_to_raw_opportunity(j) for j in relevant]
-        return SourceRunResult(source=self.name, status="SUCCESS", opportunities=opportunities, raw_count=len(jobs))
+        return SourceRunResult(source=self.name, status="SUCCESS", opportunities=opportunities, raw_count=len(jobs), requests_made=1)

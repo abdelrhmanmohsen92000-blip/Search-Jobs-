@@ -27,6 +27,7 @@ search_modes:
     frequency: daily
     employment_types: ["Full-time"]
     freelance_only: false
+    query_terms: []            # Phase 5: role + location only, e.g. "BIM Architect" Riyadh
 
   REMOTE_FULL_TIME:  # renamed from REMOTE (Phase 4.2) to match the opportunity mode it targets
     enabled: true
@@ -34,6 +35,8 @@ search_modes:
     frequency: daily
     employment_types: ["Remote"]
     freelance_only: false
+    query_terms: []
+    remote_only_locations: true  # Phase 5: queries use "remote" instead of target locations
 
   CONTRACT:
     enabled: true
@@ -41,6 +44,7 @@ search_modes:
     frequency: weekly
     employment_types: ["Contract"]
     freelance_only: false
+    query_terms: ["contract"]
 
   PART_TIME:
     enabled: false
@@ -48,6 +52,7 @@ search_modes:
     frequency: weekly
     employment_types: ["Part-time"]
     freelance_only: false
+    query_terms: ["part-time"]
 
   FREELANCE:
     enabled: true
@@ -55,6 +60,7 @@ search_modes:
     frequency: weekly
     employment_types: ["Freelance", "Project-based"]
     freelance_only: true
+    query_terms: ["freelance", "project"]
 
 # --- Opportunity Intelligence (Phase 4.2) -----------------------------------
 # Read by scripts/lib/opportunity_modes.py and

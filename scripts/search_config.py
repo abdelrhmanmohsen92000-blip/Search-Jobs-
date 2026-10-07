@@ -166,6 +166,55 @@ def build_query_plan(region=None, remote_only=False, freelance_only=False, inclu
     return plan
 
 
+ROLE_TIERS = ("core", "secondary", "adjacent")
+
+
+def build_search_engine_queries(mode=None, limit=None, matrix=None):
+    """Phase 5 discovery queries for a search-engine provider, e.g.
+    '"BIM Architect" Riyadh', '"Revit Architect" remote', '"BIM Architect" Dubai freelance'.
+
+    - Budget (limit, default search_limits.max_queries_per_run) is split across
+      config `target_locations` tiers by weight, so a run never spends
+      everything on one country; within each tier, core roles come first and
+      locations rotate so they are not all spent on one city.
+    - mode (an entry from scripts.lib.career_state.active_modes()) adds its own
+      `query_terms` (one per query, rotating) and, with remote_only_locations,
+      searches "remote" instead of the target locations.
+    - One role per query; skills are never ANDed together.
+    """
+    matrix = matrix if matrix is not None else cfg_lib.load_search_matrix()
+    limit = limit if limit is not None else cfg_lib.search_limits(matrix)["max_queries_per_run"]
+    roles = [(tier, r) for tier in ROLE_TIERS for r in (matrix.get("role_query_matrix") or {}).get(tier) or []]
+    tiers = matrix.get("target_locations") or []
+    if not roles or not tiers or not limit:
+        return []
+    mode = mode or {}
+    terms = mode.get("query_terms") or [None]
+    if mode.get("remote_only_locations"):
+        tiers = [{"tier": 5, "region": "REMOTE", "locations": ["remote"], "weight": 1}]
+
+    total_weight = sum(t.get("weight", 1) for t in tiers) or 1
+    queries, seen, term_i = [], set(), 0
+    for t in sorted(tiers, key=lambda t: t.get("tier", 99)):
+        share = max(1, round(limit * t.get("weight", 1) / total_weight))
+        locations = t.get("locations") or []
+        taken = 0
+        for i, (role_tier, role) in enumerate(roles):
+            if taken >= share or len(queries) >= limit:
+                break
+            location = locations[i % len(locations)] if locations else ""
+            term = terms[term_i % len(terms)]
+            term_i += 1
+            query = " ".join(x for x in (f'"{role}"', location, term) if x)
+            if query in seen:
+                continue
+            seen.add(query)
+            queries.append({"query_string": query, "role": role, "role_tier": role_tier, "location": location,
+                            "region": t.get("region"), "region_tier": t.get("tier"), "mode": mode.get("name")})
+            taken += 1
+    return queries[:limit]
+
+
 def summarize_plan(plan, matrix=None):
     by_access = {}
     for q in plan:

@@ -150,6 +150,28 @@ def build_browser_queue(region=None, remote_only=False, freelance_only=False, li
             continue
         add_task(q["source"], "PUBLIC_WEB", q["title"], q["region"])
 
+    # Phase 5: registry companies whose careers URL could not be verified. A
+    # human finds and confirms the URL; nothing here proposes a guessed one.
+    from scripts.sources import company_careers
+    for target in company_careers.unverified_targets(company_careers.load_targets()):
+        note = (target.get("url_verification") or {}).get("note", "")
+        tasks.append({
+            "task_type": "VERIFY_COMPANY_CAREER_URL",
+            "source": target.get("company"),
+            "url": None,
+            "query": f'"{target.get("company")}" official careers page',
+            "region": ", ".join(target.get("regions") or []) or "UNKNOWN",
+            "priority": (target.get("priority") or "MEDIUM").upper(),
+            "reason": f"Target company with no verified careers URL. {note}".strip(),
+            "expected_value": "Unlocks automatic career-page monitoring for this company",
+            "expected_information": "The company's official careers/job-listing URL on its own domain. Add it to "
+                                    "config/target_companies.yaml with url_verification.status and enabled: true.",
+            "manual_action": "Find the official careers page in a browser, confirm it lists jobs, then update "
+                             "config/target_companies.yaml. Do not use an aggregator URL.",
+            "status": "PENDING",
+            "created_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        })
+
     priority_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
     tasks.sort(key=lambda t: priority_rank.get(t["priority"], 3))
     return tasks

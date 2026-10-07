@@ -59,6 +59,8 @@ def active_modes(state=None):
             "frequency": (cfg.get("frequency") or "weekly").lower(),
             "employment_types": cfg.get("employment_types") or [],
             "freelance_only": bool(cfg.get("freelance_only", False)),
+            "query_terms": list(cfg.get("query_terms") or []),
+            "remote_only_locations": bool(cfg.get("remote_only_locations", False)),
         })
     out.sort(key=lambda m: PRIORITY_RANK.get(m["priority"], 9))
     return out

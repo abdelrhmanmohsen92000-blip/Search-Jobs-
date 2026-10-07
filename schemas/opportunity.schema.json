@@ -121,6 +121,14 @@
       "description": "Phase 4.2: match_score scaled by relevance to the current career goal. Separate from match_score, which is never modified."
     },
     "career_priority": { "type": ["string", "null"], "enum": ["HIGH", "MEDIUM", "LOW", null] },
+    "job_page_url": { "type": ["string", "null"], "description": "Phase 5: the page describing this specific job (may differ from source_url, e.g. a search result)." },
+    "application_url": { "type": ["string", "null"], "description": "Phase 5: where to apply. 'UNKNOWN' unless explicitly known — never assumed equal to the job page." },
+    "company_career_url": { "type": ["string", "null"], "description": "Phase 5: the company careers page this job was discovered from, if any." },
+    "closing_date": { "type": ["string", "null"], "description": "Phase 5: stated application deadline (JobPosting validThrough), never inferred." },
+    "freshness": {
+      "type": ["string", "null"], "enum": ["FRESH", "RECENT", "AGING", "STALE", "CLOSED", "UNKNOWN", null],
+      "description": "Phase 5: age bucket from an actual posted date; UNKNOWN when no date was published."
+    },
     "exceptional_opportunity": { "type": ["boolean", "null"], "default": false },
     "exceptional_reasons": { "type": "array", "items": { "type": "string" }, "default": [] }
   },
