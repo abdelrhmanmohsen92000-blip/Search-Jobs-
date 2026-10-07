@@ -1,0 +1,85 @@
+# Skills taxonomy (V1.4) — read by scripts/intelligence/requirements_extractor.py
+# and scripts/intelligence/analysis_engine.py.
+#
+# Each canonical skill lists the phrases that count as a mention of it
+# (matched case-insensitively on word boundaries). `transferable_from` names
+# canonical skills that make this one quick to pick up: if a job requires
+# Dynamo and the profile has Revit, Dynamo is reported TRANSFERABLE rather than
+# simply MISSING. Edit freely — nothing here is hard-coded in Python.
+#
+# category: software | method | discipline | standard
+
+skills:
+  Revit: {aliases: [revit, autodesk revit, revit architecture], category: software}
+  Navisworks: {aliases: [navisworks], category: software, transferable_from: [Solibri]}
+  AutoCAD: {aliases: [autocad], category: software}
+  BIM 360: {aliases: [bim 360, bim360], category: software, transferable_from: [Autodesk Construction Cloud]}
+  Autodesk Construction Cloud: {aliases: [autodesk construction cloud, acc], category: software, transferable_from: [BIM 360]}
+  Dynamo: {aliases: [dynamo], category: software, transferable_from: [Revit]}
+  3ds Max: {aliases: [3ds max, 3dsmax, 3d max, 3d studio max], category: software}
+  V-Ray: {aliases: [v-ray, vray], category: software, transferable_from: [3ds Max]}
+  Lumion: {aliases: [lumion], category: software, transferable_from: [3ds Max, Twinmotion, Enscape]}
+  Enscape: {aliases: [enscape], category: software, transferable_from: [Revit]}
+  Twinmotion: {aliases: [twinmotion], category: software, transferable_from: [Lumion, Enscape]}
+  SketchUp: {aliases: [sketchup, sketch up], category: software, transferable_from: [Revit, AutoCAD]}
+  Rhino: {aliases: [rhino, rhinoceros], category: software, transferable_from: [3ds Max]}
+  Grasshopper: {aliases: [grasshopper], category: software, transferable_from: [Dynamo]}
+  ArchiCAD: {aliases: [archicad], category: software, transferable_from: [Revit]}
+  Solibri: {aliases: [solibri], category: software, transferable_from: [Navisworks]}
+  Tekla: {aliases: [tekla], category: software, transferable_from: [Revit]}
+  Civil 3D: {aliases: [civil 3d], category: software, transferable_from: [AutoCAD]}
+  Photoshop: {aliases: [photoshop], category: software}
+  BIM: {aliases: [bim, building information modeling, building information modelling], category: method}
+  BIM Coordination: {aliases: [bim coordination, model coordination, bim coordinator], category: method}
+  Clash Detection: {aliases: [clash detection, clash coordination, clash resolution], category: method}
+  LOD: {aliases: [lod 300, lod 350, lod 400, lod 500, lod300, lod350, lod400, level of development], category: standard}
+  ISO 19650: {aliases: [iso 19650, iso19650], category: standard}
+  BIM Execution Plan: {aliases: [bim execution plan, bim execution plans, bep], category: method, transferable_from: [ISO 19650, BIM Coordination]}
+  Construction Documentation: {aliases: [construction documentation, construction documents, working drawings, technical documentation], category: method}
+  Shop Drawings: {aliases: [shop drawings, shop drawing], category: method}
+  Quantity Take-off: {aliases: [boq, bill of quantities, quantity take-off, quantity takeoff, material takeoff], category: method}
+  Revit Families: {aliases: [revit families, revit family, families and templates], category: method, transferable_from: [Revit]}
+  Architectural Design: {aliases: [architectural design], category: discipline}
+  Interior Design: {aliases: [interior design, interior projects, interiors], category: discipline}
+  Exterior Design: {aliases: [exterior design, facade design, façade design, facade], category: discipline}
+  Landscape Design: {aliases: [landscape design, landscape architecture, landscape], category: discipline}
+  Master Planning: {aliases: [master planning, masterplanning, master plan], category: discipline}
+  Visualization: {aliases: [visualization, visualisation, rendering, renderings], category: discipline}
+  Project Licensing: {aliases: [permitting, building permits, project licensing], category: method}
+  Team Management: {aliases: [managing bim teams, team management, lead a team, managing teams], category: method}
+
+certifications:
+  Autodesk Certified Professional: [autodesk certified professional, autodesk certified, autodesk certification]
+  PMP: [pmp]
+  LEED: [leed]
+  BIM Professional Certification: [bre bim, bim certification, buildingsmart]
+  Saudi Council of Engineers: [saudi council of engineers, sce membership, sce registration]
+  ARB Registration: [arb registration, arb-registered, arb registered]
+  RIBA: [riba chartered, riba]
+
+languages: [Arabic, English, French, German, Spanish, Italian, Turkish, Urdu, Hindi]
+
+benefits:
+  Housing allowance: [housing allowance, accommodation, housing provided]
+  Transportation allowance: [transportation allowance, transport allowance, company car]
+  Medical insurance: [medical insurance, health insurance]
+  Annual flight ticket: [annual ticket, annual flight, air ticket, flight ticket]
+  Visa sponsorship: [visa sponsorship provided, visa provided, we sponsor visas, visa sponsorship available]
+  Relocation support: [relocation package, relocation support, relocation assistance]
+  Performance bonus: [performance bonus, annual bonus]
+  End of service benefits: [end of service, gratuity]
+
+# Phrases that state an eligibility barrier for this candidate (based in Egypt,
+# Egyptian national, profile.md). Matched on the posting text; reported as a
+# risk, never used to invent a requirement.
+eligibility_barriers:
+  - pattern: "right to work in the (uk|united kingdom|us|usa|united states|eu|european union)"
+    label: "Requires existing right to work in that country"
+  - pattern: "no visa sponsorship|not able to sponsor|unable to sponsor|cannot sponsor|no sponsorship"
+    label: "No visa sponsorship"
+  - pattern: "(saudi|qatari|emirati|uae|kuwaiti|omani|bahraini) nationals? only|nationals only"
+    label: "Restricted to nationals"
+  - pattern: "arb registration|arb-registered|arb registered"
+    label: "Requires UK ARB registration"
+  - pattern: "security clearance"
+    label: "Requires security clearance"

@@ -1,0 +1,39 @@
+# Notifications (V1.5) — read by scripts/intelligence/notifications.py.
+#
+# Every notification is recorded in tracking/notifications.csv (the dashboard
+# inbox) and de-duplicated, so the same event is never raised twice.
+# Notifications only ever go to YOU. Nothing here contacts a recruiter,
+# company or any other person.
+
+channels:
+  terminal:
+    enabled: true            # printed when a CLI / scheduler command raises it
+  email:
+    enabled: true
+    mode: outbox             # writes ready-to-send .eml files to data/outbox/email/ — never sends
+    to: UNKNOWN              # your own address, if you want it pre-filled in the .eml files
+  webhook:
+    enabled: false           # POSTs a small JSON payload to YOUR endpoint (Slack/Discord/ntfy/Zapier...)
+    url_env: CAREER_HUNTER_WEBHOOK_URL   # the URL is read from this env var — never stored in config
+    timeout_seconds: 10
+
+events:
+  NEW_HIGH_PRIORITY_JOB:
+    enabled: true
+    min_opportunity_score: 85
+    decisions: [APPLY_NOW, APPLY, NETWORK_FIRST]
+    always_for_decisions: [APPLY_NOW]   # notify for these even below the score threshold
+  APPLICATION_FOLLOWUP:
+    enabled: true
+  NETWORKING_FOLLOWUP:
+    enabled: true
+  INTERVIEW:
+    enabled: true
+  OFFER:
+    enabled: true
+  SOURCE_FAILURE:
+    enabled: true
+    min_consecutive_failures: 2
+    ignore_error_types: [AUTH_REQUIRED, NETWORK_OFFLINE]   # known/expected states, reported in source health instead
+  WEEKLY_REPORT:
+    enabled: true

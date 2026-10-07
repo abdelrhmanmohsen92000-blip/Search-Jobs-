@@ -1,0 +1,40 @@
+# Networking engine settings (V1.4) — read by scripts/intelligence/networking_engine.py.
+#
+# The engine only SUGGESTS who to reach and prepares DRAFTS. It never sends a
+# message, connection request or email, and never contacts anyone. Every
+# action stays SUGGESTED until you mark it yourself (approve / done / dismiss).
+
+contact_types:
+  - recruiter
+  - hiring manager
+  - BIM manager
+  - architecture director
+  - project manager
+  - department lead
+  - employee/referral
+
+# Which jobs get networking actions.
+eligibility:
+  decisions: [APPLY_NOW, APPLY, NETWORK_FIRST]
+  min_opportunity_score: 70      # REVIEW jobs above this also qualify
+
+# Contact types per role family (matched against the job title, first match wins).
+role_family_contacts:
+  - keywords: [bim manager, bim lead, head of bim, digital delivery manager]
+    contacts: [department lead, architecture director, recruiter]
+  - keywords: [bim, revit, navisworks, modeler, modeller]
+    contacts: [BIM manager, recruiter, employee/referral]
+  - keywords: [interior, fit-out]
+    contacts: [hiring manager, recruiter, employee/referral]
+  - keywords: [landscape, exterior, facade, master plan]
+    contacts: [hiring manager, architecture director, recruiter]
+  - keywords: [architect, architectural, designer]
+    contacts: [architecture director, recruiter, employee/referral]
+default_contacts: [hiring manager, recruiter]
+
+# Extra contact types added in specific situations.
+network_first_extra: employee/referral     # warm intro when the decision is NETWORK_FIRST
+project_based_extra: project manager       # freelance / contract / project-based work
+
+follow_up_days: 7          # suggest a follow-up this many days after you mark an action DONE
+max_actions_per_job: 3

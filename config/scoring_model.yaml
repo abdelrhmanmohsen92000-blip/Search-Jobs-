@@ -1,0 +1,55 @@
+# Versioned decision model (V1.4 / V1.7) — read by scripts/intelligence/scoring_model.py.
+#
+# The ACTIVE version drives every analysis. The learning loop
+# (scripts/intelligence/learning_loop.py) can only PROPOSE a new version as a
+# suggestion file; it is added here — and made active — only by an explicit
+# `career_hunter.py learning approve <suggestion_id>`. Old versions are kept so
+# every stored analysis remains explainable by the model that produced it.
+#
+# Weight groups each sum to 100. Scores are 0-100.
+
+active_version: "1.0"
+
+versions:
+  "1.0":
+    created_at: "2026-10-07"
+    created_by: initial
+    notes: Initial V1.4 model — hand-set weights, no outcome data yet.
+
+    # Overall Match Score = the V1.1 100-point model over 8 sub-scores (0-10),
+    # explicit when assessed, otherwise derived from the evidence dimensions below.
+    match_weights:
+      technical: 25
+      experience: 20
+      software: 15
+      project: 10
+      location: 10
+      eligibility: 10
+      career_value: 5
+      compensation: 5
+
+    # Profile Match dimension (how well YOU fit this role).
+    profile_match_weights:
+      skills: 45
+      experience: 25
+      role_relevance: 15
+      portfolio_evidence: 15
+
+    # Opportunity Score (how worthwhile this opportunity is overall).
+    opportunity_weights:
+      overall_match: 40
+      company_quality: 8
+      career_growth: 10
+      compensation: 5
+      freshness: 10
+      ease_of_application: 10   # 100 - application_difficulty
+      networking_value: 5
+      strategic_value: 12
+
+    decision_thresholds:
+      apply_now: {opportunity: 82, overall_match: 78, max_difficulty: 50}
+      apply: {opportunity: 68, overall_match: 64}
+      network_first: {overall_match: 55, min_networking_value: 60, min_difficulty: 55}
+      review: {overall_match: 50}
+      watch: {overall_match: 35}
+      min_confidence_to_apply: 40

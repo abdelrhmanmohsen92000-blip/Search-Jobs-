@@ -67,6 +67,9 @@ def http_fetch(url, timeout=10, retries=1, backoff=1.5, headers=None):
     """GET a URL. Returns (body_bytes, error, http_status). Never raises.
     http_status is the real response code when one was received, else None
     (DNS failure, refused tunnel, timeout)."""
+    from scripts.lib import runtime
+    if runtime.is_offline():  # NETWORK_MODE=offline: never touch the network
+        return None, "NETWORK_OFFLINE: NETWORK_MODE=offline", None
     headers = {"User-Agent": USER_AGENT, **(headers or {})}
     last_error, last_status = None, None
     for attempt in range(retries + 1):

@@ -44,10 +44,11 @@ from scripts.intelligence.ai_provider import AIProvider, RuleBasedAIProvider  # 
 
 API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
-DEFAULT_MODEL = "claude-sonnet-5"
+DEFAULT_MODEL = "claude-opus-5-5"
 DEFAULT_TIMEOUT = 20
 DEFAULT_MAX_RETRIES = 2
-DEFAULT_MAX_TOKENS = 1024
+DEFAULT_MAX_TOKENS = 16000  # thinking is always on for current models; leave room for it
+DEFAULT_EFFORT = "low"  # extraction/classification work: lowest effort that holds quality
 
 
 class ClaudeAIProvider(AIProvider):
@@ -60,8 +61,9 @@ class ClaudeAIProvider(AIProvider):
     name = "claude"
 
     def __init__(self, model=None, timeout=None, max_retries=None, max_tokens=None,
-                 api_key_env_var="ANTHROPIC_API_KEY", model_env_var="ANTHROPIC_MODEL"):
+                 api_key_env_var="ANTHROPIC_API_KEY", model_env_var="ANTHROPIC_MODEL", effort=None):
         self._configured_model = model or DEFAULT_MODEL
+        self.effort = effort or DEFAULT_EFFORT
         self.timeout = timeout or DEFAULT_TIMEOUT
         self.max_retries = max_retries if max_retries is not None else DEFAULT_MAX_RETRIES
         self.max_tokens = max_tokens or DEFAULT_MAX_TOKENS
@@ -85,6 +87,9 @@ class ClaudeAIProvider(AIProvider):
         Claude call succeeded.
         """
         context = context or {}
+        from scripts.lib import runtime
+        if runtime.is_offline():
+            return self._fallback(prompt, context, status="NETWORK_OFFLINE", note="NETWORK_MODE=offline — no API call made.")
         api_key = self._api_key()
 
         if not api_key:
@@ -99,6 +104,7 @@ class ClaudeAIProvider(AIProvider):
             "max_tokens": self.max_tokens,
             "system": "Respond with a single JSON object only, no prose outside the JSON.",
             "messages": [{"role": "user", "content": self._build_prompt(prompt, context)}],
+            "output_config": {"effort": self.effort},
         }
         headers = {
             "x-api-key": api_key,
@@ -110,15 +116,20 @@ class ClaudeAIProvider(AIProvider):
         if error:
             return self._fallback(prompt, context, status=error_kind, note=error)
 
+        if data.get("stop_reason") == "refusal":
+            details = data.get("stop_details") or {}
+            return self._fallback(prompt, context, status="REFUSAL",
+                                  note=f"Model declined the request (category: {details.get('category')}).")
         try:
-            text = data["content"][0]["text"]
+            # Current models return thinking blocks before the answer: read the first text block.
+            text = next(b["text"] for b in data["content"] if b.get("type", "text") == "text" and "text" in b)
             usage = data.get("usage", {})
             self.last_usage = {
                 "input_tokens": usage.get("input_tokens"),
                 "output_tokens": usage.get("output_tokens"),
             }
             parsed = json.loads(text)
-        except (KeyError, IndexError, json.JSONDecodeError) as e:
+        except (KeyError, IndexError, StopIteration, TypeError, json.JSONDecodeError) as e:
             return self._fallback(prompt, context, status="MALFORMED_RESPONSE", note=f"{type(e).__name__}: {e}")
 
         return {

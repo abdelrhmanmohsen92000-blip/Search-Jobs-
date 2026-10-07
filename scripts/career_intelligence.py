@@ -93,6 +93,12 @@ def opportunity_from_jobs_row(row):
         "salary_currency": row.get("salary_currency") or None, "salary_period": row.get("salary_period") or None,
         "salary_source": row.get("salary_source") or None, "salary_confidence": row.get("salary_confidence") or None,
         "match_score": _float_or_none(row.get("score")),
+        # V1.4 analysis summary columns (blank on older rows).
+        "description": row.get("description") or "",
+        "decision": row.get("decision") or None,
+        "opportunity_score": _float_or_none(row.get("opportunity_score")),
+        "analysis_confidence": _float_or_none(row.get("analysis_confidence")),
+        "model_version": row.get("model_version") or None,
         "priority": row.get("priority") or None,
         "status": row.get("status") or None,
         "reason": row.get("notes") or None,

@@ -158,6 +158,7 @@ def _build_claude_provider(config):
         max_tokens=meta.get("max_tokens"),
         api_key_env_var=meta.get("api_key_env_var", "ANTHROPIC_API_KEY"),
         model_env_var=meta.get("model_env_var", "ANTHROPIC_MODEL"),
+        effort=meta.get("effort"),
     )
 
 

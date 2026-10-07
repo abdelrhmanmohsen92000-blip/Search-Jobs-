@@ -22,7 +22,7 @@ from scripts.lib import paths  # noqa: E402
 from scripts.lib import source_health as source_health_lib  # noqa: E402
 
 _NOT_ATTEMPTED = ("NOT_RUN_THIS_CYCLE", "DISABLED", "BROWSER_REQUIRED", "MANUAL", "NOT_IMPLEMENTED",
-                  "AUTH_REQUIRED", "COOLDOWN")
+                  "AUTH_REQUIRED", "COOLDOWN", "OFFLINE")
 
 SNAPSHOT_FIELDS_HELP = (
     "run_id, started_at, completed_at, queries, providers, results_count, "

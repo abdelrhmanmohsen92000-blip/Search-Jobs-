@@ -68,9 +68,10 @@ _STATUS_MAP = {
     "NOT_RUN_THIS_CYCLE": "MANUAL",  # never actually attempted this run — not a failure
     "AUTH_REQUIRED": "MANUAL",  # credentials missing — never attempted, so not a failed request
     "COOLDOWN": "MANUAL",  # skipped on purpose during a backoff window — not a failed request
+    "OFFLINE": "MANUAL",  # NETWORK_MODE=offline — deliberately not requested
 }
 
-_NOT_ATTEMPTED = ("NOT_RUN_THIS_CYCLE", "DISABLED", "NOT_IMPLEMENTED", "MANUAL", "COOLDOWN")
+_NOT_ATTEMPTED = ("NOT_RUN_THIS_CYCLE", "DISABLED", "NOT_IMPLEMENTED", "MANUAL", "COOLDOWN", "OFFLINE")
 
 
 def load_policy(matrix=None):
@@ -231,7 +232,7 @@ def update_source_health(source_health_results, csv_path=None):
         raw_status = result.get("status")
         mapped = classify_status(raw_status, result.get("error"))
         previous = existing.get(source_name, {})
-        if raw_status == "COOLDOWN" and previous:
+        if raw_status in ("COOLDOWN", "OFFLINE") and previous:
             continue  # skipped during its backoff window: the last real outcome stands unchanged
         if mapped == "MANUAL":
             # Record its presence/current state without inflating request/success counters —

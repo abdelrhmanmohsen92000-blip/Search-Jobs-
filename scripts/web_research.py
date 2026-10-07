@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.daily_research import DEFAULT_SUB_SCORES, opportunity_to_jobs_row, upsert_jobs_rows  # noqa: E402
+from scripts.daily_research import opportunity_to_jobs_row, upsert_jobs_rows  # noqa: E402
 from scripts.intelligence import opportunity_priority  # noqa: E402
 from scripts.lib import opportunity_modes  # noqa: E402
 from scripts.lib import config as cfg_lib, dedup as dedup_lib, entity_resolution, normalize as norm_lib  # noqa: E402
@@ -97,15 +97,22 @@ def score_and_finalize(candidates, profile=None, settings=None):
     company_map = entity_resolution.resolve_companies(company_names)
 
     scored = []
+    from scripts.intelligence import analysis_engine, company_intel
+    lookup = company_intel.make_lookup(company_intel.build_company_index(extra_jobs=merged))
     for opp in merged:
         canonical = company_map.get(opp.get("company"))
         if canonical and canonical != opp.get("company"):
             opp["company_canonical"] = canonical
 
-        explicit_sub_scores = opp.get("_sub_scores") is not None
-        sub_scores = opp.pop("_sub_scores", None) or DEFAULT_SUB_SCORES
-        result = scoring.score_opportunity_record(opp, sub_scores, profile=profile)
-        result["sub_scores_explicit"] = explicit_sub_scores
+        explicit = opp.pop("_sub_scores", None)
+        opp["freshness"] = staleness.compute_freshness(opp)
+        analysis = analysis_engine.analyze(opp, profile=profile, settings=settings, company_lookup=lookup,
+                                           explicit_sub_scores=explicit)
+        result = scoring.score_opportunity_record(opp, explicit or analysis["sub_scores"], profile=profile)
+        result["sub_scores_explicit"] = explicit is not None
+        result["sub_scores_source"] = analysis["sub_scores_source"]
+        opp.update(analysis=analysis, decision=analysis["decision"], opportunity_score=analysis["opportunity_score"],
+                   analysis_confidence=analysis["confidence"], model_version=analysis["model_version"])
         opp["match_score"] = result["score"]
         opp["priority"] = result["priority"]
         opp["reason"] = "; ".join(result["strengths"][:2]) or "Scored with neutral default sub-scores."
@@ -122,7 +129,11 @@ def score_and_finalize(candidates, profile=None, settings=None):
 def save_to_jobs_csv(scored):
     if not scored:
         return
+    before = {r.get("id") for r in storage.read_csv(paths.JOBS_CSV)}
     upsert_jobs_rows([opportunity_to_jobs_row(o) for o in scored])
+    new_ids = {r.get("id") for r in storage.read_csv(paths.JOBS_CSV)} - before
+    from scripts.intelligence import post_research
+    return post_research.process(scored, new_job_ids=new_ids)
 
 
 def run_web_import(directory=None, file_path=None, dry_run=False):

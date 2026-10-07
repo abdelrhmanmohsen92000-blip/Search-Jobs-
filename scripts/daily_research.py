@@ -34,9 +34,10 @@ from scripts.networking_intelligence import generate_networking_queue, load_netw
 from scripts.sources import REGISTRY as SOURCE_REGISTRY  # noqa: E402
 from scripts.intelligence.application_strategy import combined_portfolio_evidence  # noqa: E402
 from scripts.intelligence.ai_provider import tier_for_score  # noqa: E402
-from scripts.intelligence import opportunity_priority  # noqa: E402
+from scripts.intelligence import ai_provider as ai_provider_lib  # noqa: E402
+from scripts.intelligence import analysis_engine, company_intel, opportunity_priority, post_research  # noqa: E402
 from scripts.lib import opportunity_modes  # noqa: E402
-from scripts.lib import career_state as career_state_lib, source_registry, staleness  # noqa: E402
+from scripts.lib import career_state as career_state_lib, runtime, source_registry, staleness  # noqa: E402
 from scripts.sources import company_careers  # noqa: E402
 from scripts.web import search_discovery  # noqa: E402
 from scripts.web.brave_search import BraveSearchProvider  # noqa: E402
@@ -61,6 +62,8 @@ JOBS_FIELDNAMES = [
     # Phase 5 — provenance, URL roles and freshness (appended; older rows read back blank/UNKNOWN).
     "date_posted", "closing_date", "freshness", "lifecycle_status", "job_page_url", "application_url",
     "company_career_url", "retrieved_at", "extraction_method", "confidence_score",
+    # V1.4 analysis summary (full analysis: data/analyses/<id>.json, history: tracking/analyses.csv)
+    "decision", "opportunity_score", "analysis_confidence", "model_version", "description",
 ]
 
 # Columns that hold evidence/identity: on re-discovery an existing non-empty
@@ -71,7 +74,7 @@ _EVIDENCE_COLUMNS = (
     "employment_type", "required_experience", "skills_required", "software_required", "project_types",
     "visa_sponsorship", "salary_min", "salary_max", "salary_currency", "salary_period", "salary_source",
     "salary_confidence", "date_posted", "closing_date", "job_page_url", "application_url",
-    "company_career_url", "retrieved_at", "extraction_method",
+    "company_career_url", "retrieved_at", "extraction_method", "description",
 )
 _UNION_COLUMNS = ("matched_modes", "discovered_via_modes", "exceptional_reasons", "alternate_source_urls")
 
@@ -135,6 +138,11 @@ def opportunity_to_jobs_row(o):
         "retrieved_at": (o.get("provenance") or {}).get("retrieved_at") or "",
         "extraction_method": (o.get("provenance") or {}).get("extraction_method") or "",
         "confidence_score": o.get("confidence_score"),
+        "decision": o.get("decision") or "",
+        "opportunity_score": o.get("opportunity_score"),
+        "analysis_confidence": o.get("analysis_confidence"),
+        "model_version": o.get("model_version") or "",
+        "description": (o.get("description") or "")[:4000],
     })
     return row
 
@@ -223,6 +231,11 @@ def run_source_adapters(enabled_sources=None, limit_per_source=None, health=None
     for name, adapter in SOURCE_REGISTRY.items():
         if enabled_sources and name not in enabled_sources:
             continue
+        if runtime.is_offline() and name != "Manual Import":
+            source_health.append({"source": name, "status": "OFFLINE", "error": None, "opportunities": [],
+                                  "raw_count": 0, "notes": "NETWORK_MODE=offline — not requested.",
+                                  "attempted_at": _dt.datetime.now().isoformat(timespec="seconds")})
+            continue
         if health is not None and source_health_lib.in_cooldown(health.get(name)):
             source_health.append({  # Phase 5: inside a backoff window — not requested, not a new failure
                 "source": name, "status": "COOLDOWN", "error": None, "opportunities": [], "raw_count": 0,
@@ -304,18 +317,14 @@ def normalize_and_score(raw_records, profile=None, discovered_via_mode=None, set
         unique, duplicates, on_merge=lambda c, d: opportunity_modes.merge_mode_data(c, d, precedence))
 
     scored = []
+    company_lookup = company_intel.make_lookup(company_intel.build_company_index(extra_jobs=unique))
+    contacts = storage.read_csv(paths.NETWORKING_CSV)
+    llm = ai_provider_lib.get_ai_provider()  # rule_based by default: no network, no key, no LLM call
+    llm = None if llm.name == "rule_based" else llm
     for opp in unique:
-        explicit_sub_scores = opp.get("_sub_scores") is not None
-        sub_scores = opp.pop("_sub_scores", None) or DEFAULT_SUB_SCORES
-        result = scoring.score_opportunity_record(opp, sub_scores, profile=profile)
-        result["sub_scores_explicit"] = explicit_sub_scores
+        explicit_sub_scores = opp.pop("_sub_scores", None)
         opp["lifecycle_status"] = opp.get("lifecycle_status") or staleness.compute_lifecycle_status(opp)
         opp["freshness"] = staleness.compute_freshness(opp)  # Phase 5: from a published date only
-        opp["match_score"] = result["score"]
-        opp["priority"] = result["priority"]
-        opp["reason"] = "; ".join(result["strengths"][:2]) or "Scored with neutral default sub-scores (no explicit assessment provided)."
-        opp["scoring_result"] = result
-        opp["status"] = opp.get("status") or "scored"
 
         # Portfolio evidence (Phase 4): rule-based, zero AI cost, so every
         # normalized opportunity gets it — never gated behind the AI-tier
@@ -332,6 +341,29 @@ def normalize_and_score(raw_records, profile=None, discovered_via_mode=None, set
                 "profile_capability_matches": [e for e in evidence if e.get("evidence_tier") == "PROFILE_CAPABILITY"],
                 "regional_matches": [e for e in evidence if e.get("evidence_tier") == "REGIONAL_EXPERIENCE"],
             }
+
+        # V1.4 analysis: requirements, skills gap, 12 dimensions, decision.
+        # When no sub-scores were explicitly assessed, the 100-point
+        # match_score is computed from evidence-derived sub-scores instead of
+        # neutral defaults; the source is recorded in scoring_result.
+        analysis = analysis_engine.analyze(opp, profile=profile, settings=settings, company_lookup=company_lookup,
+                                           contacts=contacts, explicit_sub_scores=explicit_sub_scores,
+                                           llm_provider=llm)
+        sub_scores = explicit_sub_scores or analysis["sub_scores"]
+        result = scoring.score_opportunity_record(opp, sub_scores, profile=profile)
+        result["sub_scores_explicit"] = explicit_sub_scores is not None
+        result["sub_scores_source"] = analysis["sub_scores_source"]
+        opp["match_score"] = result["score"]
+        opp["priority"] = result["priority"]
+        opp["reason"] = "; ".join(result["strengths"][:2]) or "; ".join(analysis["reasons"][:2])
+        opp["scoring_result"] = result
+        opp["status"] = opp.get("status") or "scored"
+        opp["analysis"] = analysis
+        opp["decision"] = analysis["decision"]
+        opp["opportunity_score"] = analysis["opportunity_score"]
+        opp["analysis_confidence"] = analysis["confidence"]
+        opp["model_version"] = analysis["model_version"]
+
         # Career-goal priority and exceptional status (Phase 4.2) — separate
         # fields next to match_score, which is left untouched. Runs after
         # portfolio evidence so it can cite direct project evidence, but never
@@ -735,7 +767,9 @@ def build_acquisition_plan(mode=None, source_filter=None, health=None):
         if source_filter and src["name"] != source_filter:
             continue
         if src["implementation"] in ("ADAPTER", "CAREER_PAGES", "SEARCH_PROVIDER", "MANUAL_IMPORT"):
-            if src["credential_env"] and not src["credential_present"]:
+            if runtime.is_offline() and src["implementation"] != "MANUAL_IMPORT":
+                planned = "OFFLINE (NETWORK_MODE=offline)"
+            elif src["credential_env"] and not src["credential_present"]:
                 planned = "AUTH_REQUIRED (no request)"
             elif source_health_lib.in_cooldown(row):
                 planned = f"COOLDOWN until {row.get('cooldown_until')}"
@@ -794,11 +828,16 @@ def run(region=None, remote=False, freelance=False, source_filter=None, limit=No
 
     health = source_health_lib.load_health()  # SOURCE HEALTH: cooldowns decide what is requested
     extra_raw, extra_health, discovery_stats = [], [], {}
-    if not source_filter or source_filter == COMPANY_PAGES_SOURCE:  # priority 1: verified career pages
+    offline = runtime.is_offline()
+    if offline:
+        extra_health.append({"source": COMPANY_PAGES_SOURCE, "status": "OFFLINE", "error": None,
+                             "opportunities": [], "raw_count": 0, "notes": "NETWORK_MODE=offline — not requested."})
+        discovery_stats = {"status": "OFFLINE"}
+    if not offline and (not source_filter or source_filter == COMPANY_PAGES_SOURCE):  # priority 1: career pages
         company_raw, company_health = run_company_pages(health)
         extra_raw += company_raw
         extra_health += company_health
-    if not source_filter or source_filter == BraveSearchProvider.name:  # search-engine discovery
+    if not offline and (not source_filter or source_filter == BraveSearchProvider.name):  # search discovery
         search_raw, search_health, discovery_stats = run_search_provider(mode, health)
         extra_raw += search_raw
         extra_health += search_health
@@ -821,8 +860,13 @@ def run(region=None, remote=False, freelance=False, source_filter=None, limit=No
     storage.save_run_snapshot("processed", "daily_opportunities", scored)  # SAVE
 
     if scored:
+        before = {r.get("id") for r in storage.read_csv(paths.JOBS_CSV)}
         inserted, updated = upsert_jobs_rows([opportunity_to_jobs_row(o) for o in scored], settings=settings)
         stats["jobs_inserted"], stats["jobs_updated"] = inserted, updated
+        new_ids = {r.get("id") for r in storage.read_csv(paths.JOBS_CSV)} - before
+        # V1.4/V1.5: analysis history, networking suggestions, high-priority notifications
+        stats["post_processing"] = post_research.process(scored, new_job_ids=new_ids)
+    stats["decisions"] = dict(collections.Counter(o.get("decision") for o in scored))
 
     application_plans = build_plans_for_qualifying(scored)  # application intelligence, score >= 80
     if application_plans:

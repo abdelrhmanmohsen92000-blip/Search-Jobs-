@@ -15,7 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import paths  # noqa: E402
 from scripts.web.base import SearchProviderResult, SearchResult, WebSearchProvider  # noqa: E402
 
-SEARCH_RESULTS_DIR = paths.DATA_RAW / "search_results"
+SEARCH_RESULTS_DIR = None  # resolved at call time from paths.DATA_RAW (workspace-aware); tests may override
+
+
+def _search_results_dir():
+    return SEARCH_RESULTS_DIR or (paths.DATA_RAW / "search_results")
 
 
 def load_single_file(file_path):
@@ -44,7 +48,7 @@ def load_search_result_files(directory=None):
     a file it can't parse — such files are reported in `errors`, not skipped
     silently.
     """
-    directory = directory or SEARCH_RESULTS_DIR
+    directory = directory or _search_results_dir()
     results, files_read, errors = [], [], []
 
     if not directory.exists():
@@ -76,7 +80,7 @@ class ManualSearchImportProvider(WebSearchProvider):
     name = "Manual Search Import"
 
     def __init__(self, directory=None):
-        self.directory = directory or SEARCH_RESULTS_DIR
+        self.directory = directory or _search_results_dir()
 
     def search(self, query=None, limit=None):
         results, files_read, errors = load_search_result_files(self.directory)

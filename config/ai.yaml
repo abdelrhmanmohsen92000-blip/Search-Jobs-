@@ -56,11 +56,12 @@ providers:
     # configurable via ClaudeAIProvider(model_env_var=...)) overrides it at
     # call time with no code or config change, so this never needs to be
     # edited just to switch models.
-    model: claude-sonnet-5
+    model: claude-opus-5-5
     model_env_var: ANTHROPIC_MODEL
     timeout_seconds: 20
     max_retries: 2
-    max_tokens: 1024
+    max_tokens: 16000
+    effort: low            # output_config.effort for extraction calls
     implemented: true
     verified_against_live_api: false
     verified_network_reachable: true   # confirmed: api.anthropic.com is NOT blocked by this environment's egress policy

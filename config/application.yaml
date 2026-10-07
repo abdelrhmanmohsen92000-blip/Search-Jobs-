@@ -1,0 +1,45 @@
+# Application pipeline settings (V1.4) — read by scripts/intelligence/application_pipeline.py.
+#
+# CV / portfolio "versions" are LABELS for documents YOU maintain. The system
+# only recommends which one to send; it never writes, edits or sends a CV.
+# Set `file:` to the path of your real document once it exists (UNKNOWN until then).
+
+cv_versions:
+  - id: CV_BIM
+    label: BIM CV — Revit modelling, coordination, clash detection first
+    file: UNKNOWN
+    title_keywords: [bim, revit, navisworks, coordinator, coordination, digital delivery, modeler, modeller]
+  - id: CV_ARCHITECTURE
+    label: Architecture CV — design + construction documentation first
+    file: UNKNOWN
+    title_keywords: [architect, architectural]
+  - id: CV_INTERIOR
+    label: Interior design CV — interior projects and visualization first
+    file: UNKNOWN
+    title_keywords: [interior, fit-out, fit out]
+  - id: CV_EXTERIOR_LANDSCAPE
+    label: Exterior / landscape CV — facade, landscape and master planning first
+    file: UNKNOWN
+    title_keywords: [landscape, exterior, facade, master plan, urban]
+default_cv: CV_ARCHITECTURE
+
+portfolio_versions:
+  - id: PORTFOLIO_BIM
+    label: BIM portfolio — Revit models, coordination views, LOD 350 sheets
+    file: UNKNOWN
+    title_keywords: [bim, revit, navisworks, coordinator, modeler, modeller]
+  - id: PORTFOLIO_DESIGN
+    label: Design portfolio — architecture / interior / exterior projects
+    file: UNKNOWN
+    title_keywords: [architect, interior, exterior, landscape, designer, facade]
+default_portfolio: PORTFOLIO_DESIGN
+
+follow_up:
+  after_applied_days: 7        # first follow-up reminder after applying
+  repeat_every_days: 7         # later reminders while still in APPLIED / FOLLOW_UP
+  max_follow_ups: 2            # after this many, suggest moving to CLOSED
+  interview_reminder_days_before: 1
+
+# Columns of the dashboard Kanban board, in order. VERIFIED/ANALYZED jobs show
+# under DISCOVERED; WITHDRAWN/CLOSED are listed separately (not a column).
+kanban_columns: [DISCOVERED, SHORTLISTED, READY, APPLIED, FOLLOW_UP, INTERVIEW, OFFER, REJECTED]

@@ -1,0 +1,16 @@
+# Manual company priority overrides (V1.4) — read by scripts/intelligence/company_intel.py.
+#
+# Your judgement always wins over the computed company score. Key = company
+# name exactly as it appears in jobs/companies (case-insensitive). Every field
+# is optional:
+#
+#   companies:
+#     "Dar Al-Handasah":
+#       grade: A+            # A+ / A / B / C / D — replaces the computed grade
+#       notes: "Dream employer — strong healthcare BIM work"
+#     "Some Agency":
+#       grade: D
+#       notes: "Recruitment agency, poor responses"
+#
+# Nothing is pre-filled: no company fact is invented here.
+companies: {}
