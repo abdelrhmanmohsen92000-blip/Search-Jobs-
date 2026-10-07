@@ -13,7 +13,6 @@ and scores it 0-100 into grades A+ TARGET / A HIGH PRIORITY / B GOOD /
 C NORMAL / D LOW PRIORITY. Anything not observed stays UNKNOWN — no company
 fact (size, industry, reputation) is ever invented.
 """
-import collections
 import datetime as _dt
 import re
 import sys

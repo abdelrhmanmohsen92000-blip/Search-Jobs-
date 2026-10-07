@@ -387,6 +387,22 @@ def learning_v17(args):
     print(json.dumps(report, indent=2, default=str))
 
 
+def cmd_reanalyze(args):
+    from scripts.intelligence import post_research, scoring_model
+    from scripts.intelligence import career_data
+    ids = None
+    if args.job_id:
+        row = career_data.find_job(args.job_id)
+        if row is None:
+            return _not_found("job", args.job_id)
+        ids = {row["id"]}
+    changed = post_research.reanalyze(ids)
+    print(f"Re-analyzed {len(changed)} job(s) with model {scoring_model.active_model()['version']}.")
+    for c in changed:
+        if c["before"] != c["after"]:
+            print(f"  {c['id']}  {c['before'] or '-'} -> {c['after']}  {c['job_title']}")
+
+
 # --- dashboard / config / schedule / notifications / demo -----------------------------------
 
 def cmd_dashboard(args):
@@ -543,6 +559,10 @@ def register(sub):
     p.add_argument("job_id")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_job)
+
+    p = sub.add_parser("reanalyze", help="Re-run the analysis of stored jobs with the active model version")
+    p.add_argument("job_id", nargs="?", default=None)
+    p.set_defaults(func=cmd_reanalyze)
 
     p = sub.add_parser("company", help="Company intelligence for one company (id, name or id prefix)")
     p.add_argument("company_id")

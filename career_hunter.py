@@ -89,7 +89,6 @@ from scripts import company_intelligence, networking_intelligence  # noqa: F401
 from scripts import career_intelligence, daily_research, research, search_config, weekly_analysis, web_research
 from scripts import career_search_modes, cli_commands
 from scripts.intelligence import career_strategy as career_strategy_lib
-from scripts.intelligence import learning_engine as learning_engine_lib
 from scripts.lib import paths, storage
 from scripts.sources import company_careers as company_careers_lib
 from scripts.web import browser_queue as browser_queue_lib

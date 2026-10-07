@@ -154,3 +154,14 @@ def test_stats_helpers():
     assert ll._effect([1, 2, 3], [1, 2, 3]) == 0
     assert ll._next_version("1.0", {"1.0": {}, "1.1": {}}) == "1.2"
     json.dumps(ll.synthetic_records(3))
+
+
+def test_reanalyze_applies_the_active_model_to_stored_jobs(seeded):
+    from scripts.intelligence import post_research
+    s = ll.evaluate(records=ll.synthetic_records(80))["suggestion"]
+    ll.approve(s["suggestion_id"], activate=True)
+    changed = post_research.reanalyze()
+    assert len(changed) == len(seeded) and {c["model_version"] for c in changed} == {"1.1"}
+    assert {j["model_version"] for j in career_data.load_jobs()} == {"1.1"}
+    history = [r for r in __import__("scripts.lib.storage", fromlist=["x"]).read_csv(paths.ANALYSES_CSV)]
+    assert {r["model_version"] for r in history} == {"1.0", "1.1"}  # old analyses stay explainable

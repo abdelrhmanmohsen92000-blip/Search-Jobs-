@@ -23,7 +23,59 @@ search, freelance discovery, company targeting, and professional networking.
   V1.4, version numbers stop incrementing for routine work — only a genuine architectural change
   gets a new number.
 
+- **V1.3 hardening → V1.7** turn it into an **AI Career Intelligence & Automation System**:
+  `NETWORK_MODE` (local/cloud/offline) and isolated workspaces; a deterministic 12-dimension
+  analysis engine with requirement extraction, skills gap, Overall Match / Opportunity /
+  Confidence scores and explainable 🔥 APPLY_NOW · 🟢 APPLY · 🟡 REVIEW · 🔵 NETWORK_FIRST ·
+  ⚪ WATCH · 🔴 SKIP decisions (optional, verified LLM enrichment); company grades with manual
+  overrides; networking suggestions with drafts only; an application pipeline with timestamped
+  transitions and packets; a scheduler, notifications and the Daily Career Brief; a local
+  dashboard; and a versioned learning loop that only changes weights when you approve.
+
 Every file from V1.0/V1.1 (profile, templates, docs, CSVs) is preserved.
+
+## Quick start (V1.7)
+
+```bash
+pip install pyyaml jsonschema pytest           # the only dependencies
+
+# 1. Try everything on SYNTHETIC data first (offline, isolated from your real trackers)
+python career_hunter.py demo --with-activity
+python career_hunter.py --workspace demo_workspace dashboard     # http://127.0.0.1:8765
+
+# 2. Real use (your trackers in tracking/)
+python career_hunter.py config --validate
+python career_hunter.py research --dry-run       # what would be requested, nothing written
+python career_hunter.py research                 # research -> analysis -> decisions -> networking -> notifications
+python career_hunter.py report daily             # Daily Career Brief
+python career_hunter.py dashboard
+```
+
+| I want to… | Command |
+|---|---|
+| See today's priorities | `report daily` or the dashboard Overview |
+| Browse/filter jobs | `jobs --country "Saudi Arabia" --min-score 75 --decision APPLY_NOW` |
+| Understand one decision | `job JOB_ID` (reasons, risks, 12 dimensions, skills gap, requirements with provenance) |
+| Prepare an application | `application JOB_ID` (packet) · `application JOB_ID --write` |
+| Move a job through the pipeline | `application JOB_ID --status SHORTLISTED` (or drag it on the dashboard board) |
+| Network before applying | `networking` · `networking --show ACTION_ID` · after you send it: `networking --done ACTION_ID` |
+| Record an outcome | `feedback application|interview|rejection|offer|no_response|withdrawn JOB_ID [--reason "..."]` |
+| Rate a recommendation | `feedback job JOB_ID --rating good|bad --reason "..."` |
+| See skills / market | `skills` · `market` · `report weekly` |
+| Automate | `schedule list` · `schedule cron` · `schedule daemon` · `schedule run-due` |
+| Improve the model | `learning evaluate` · `learning suggestions` · `learning approve ID --activate` |
+
+**What is automated:** research, extraction, analysis, decisions, company grading, networking
+*suggestions and drafts*, reports, reminders and notifications to you, outcome learning *suggestions*.
+**What always needs you:** applying, sending any email/LinkedIn message/connection request,
+contacting anyone, moving a job to APPLIED or later, approving a learning suggestion, activating a
+model version. Nothing is ever sent or submitted by Career Hunter.
+
+Full documentation: [docs/SETUP.md](docs/SETUP.md) (local + cloud setup, environment variables,
+network requirements) · [docs/OPERATIONS.md](docs/OPERATIONS.md) (daily use, CLI, scheduler,
+notifications) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (modules, data model, IDs,
+provenance) · [docs/AI_DECISION_ENGINE.md](docs/AI_DECISION_ENGINE.md) ·
+[docs/DASHBOARD.md](docs/DASHBOARD.md) · [docs/LEARNING_LOOP.md](docs/LEARNING_LOOP.md).
 
 ## System architecture
 
@@ -627,39 +679,32 @@ LinkedIn message, apply to anything, or automate a browser — see LinkedIn poli
 
 ## Limitations (stated plainly, not glossed over)
 
-- This sandboxed environment's egress policy blocks the two live API hosts (Remote OK, Remotive)
-  with a `403` at the proxy — confirmed via direct test, not assumed. The adapters are fully
-  implemented and will return real data unmodified in an environment that allows those hosts.
-- PUBLIC_WEB boards (Indeed, Bayt, etc.) have no documented API; their adapters fetch raw HTML
-  only — no results are extracted until a parser is written per board (see "How to add a new
-  source"). This is intentional: inventing structured postings from unparsed HTML would mean
-  fabricating data, which this system refuses to do.
-- BROWSER_REQUIRED sources are never touched programmatically, by design, not by capability gap.
-- `rank_regions()` needs logged `tracking/jobs.csv` data to actually rank; with none yet, regions
-  are returned in config order (not a ranking, just a stable default) — see `search_config.py`.
-- No live web-search API or browser-automation provider is wired up in V1.3 — `web-search`
-  always reports `SEARCH_PROVIDER_UNAVAILABLE` here. Real results enter via `web-import` from
-  `data/raw/search_results/*.json`, collected by a human (or a separate browser-capable agent
-  session) running the queries in `reports/browser_search_queue.md`.
-- `page_extractor.py` cannot reliably extract a company name from free-form visible text (too
-  error-prone / too easy to fabricate) — company extraction from a page needs structured markup
-  (JSON-LD/microdata), which V1.3 doesn't parse yet. From a bare search snippet, company is only
-  filled in when a specific pattern ("X is hiring", "join X") supports it; otherwise the record
-  is correctly rejected downstream rather than guessed.
-- No real AI provider (OpenAI/Claude/local LLM) is implemented in V1.4 — `config/ai.yaml` lists
-  them as placeholders only, and selecting one falls back to the rule-based provider rather than
-  pretending to call an API. All V1.4 "AI" reasoning today is explainable, deterministic, local
-  logic grounded in actual record fields — genuinely useful, but not a language model.
-- Portfolio intelligence (`application_strategy.portfolio_recommendation()`) always reports
-  `PORTFOLIO_DATA_INSUFFICIENT` because `config/profile_skills.yaml` has no per-project metadata
-  (only project *types*) — adding real named projects there would make this functional immediately.
-- `career_strategy.market_intelligence()`'s salary pattern is always `DATA_INSUFFICIENT` because
-  `tracking/jobs.csv` doesn't persist `salary_min`/`salary_max` columns today (the opportunity
-  schema has the fields; the CSV tracker doesn't carry them through) — a real limitation worth
-  fixing before salary-pattern analysis can be trusted.
-- `scripts.career_intelligence.analyze_opportunities()` reads from `data/processed/*.json`
-  snapshots, not `tracking/jobs.csv` directly, because the CSV tracker doesn't persist the full
-  V1.1 sub-scores — run `daily`/`web-import` before `analyze`/`decision`/`intelligence`.
+Current (V1.7):
+
+- **Live acquisition needs network egress.** The code is complete (company career pages with
+  JSON-LD parsing, Remote OK, Remotive, Brave Search discovery), but this repository's cloud
+  sandbox blocks the job/career hosts at its proxy (HTTP 403), so no real job has been fetched
+  from here. On a normal workstation (`NETWORK_MODE=local`) or a cloud environment whose network
+  policy allows those hosts, the same commands fetch real postings. See docs/SETUP.md.
+- **Search discovery needs `BRAVE_SEARCH_API_KEY`.** Without it, Brave is reported
+  `AUTH_REQUIRED` and research continues with company career pages and the other sources.
+- PUBLIC_WEB boards (Indeed, Bayt, …) still fetch raw HTML only; no board-specific parser is
+  written, so they never produce postings (inventing them from unparsed HTML would be fabrication).
+  BROWSER_REQUIRED sources (LinkedIn, Glassdoor) are never automated, by design.
+- The LLM pass is optional and off by default (`config/ai.yaml` `provider: rule_based`). With
+  `provider: claude` and `ANTHROPIC_API_KEY`, it can only add requirement items that appear
+  verbatim in the posting. The Claude transport is a small stdlib HTTP client (kept to avoid a new
+  dependency); moving to the official `anthropic` SDK is a sensible follow-up.
+- The learning loop needs real outcomes: no weight suggestion is made before 50 labelled outcomes
+  (configurable in `config/learning.yaml`).
+- CV/portfolio "versions" in `config/application.yaml` are labels; set `file:` to your real
+  documents. Portfolio project facts are `evidence_status: PARTIAL` until re-verified (see
+  config/portfolio_projects.yaml).
+
+Earlier notes (V1.1–V1.4, kept for history): RANK_REGIONS needs logged data before it ranks;
+`web-search` reports `SEARCH_PROVIDER_UNAVAILABLE` and real search results can still enter via
+`web-import`; company names are only extracted from structured markup or explicit textual
+patterns, never guessed.
 
 ## Tests
 
@@ -699,3 +744,16 @@ denominator), market intelligence (sample size + confidence label), alerts (fire
 conditions only, never on empty input), decision history recording, AI-tier cost control (tier-1
 records skipped by default, included with `--deep`), and missing-profile-data handling.
 170/170 tests passing as of V1.4.
+
+V1.3-hardening → V1.7 adds: requirement extraction (provenance, UNKNOWN preservation, salary never
+read from free text), the 12-dimension analysis and every decision path (APPLY_NOW, closed → SKIP,
+eligibility barriers, outside-goal cap, low-confidence downgrade), LLM enrichment verification,
+the versioned model, company grades/overrides, networking suggestions (drafts only, statuses never
+reset), the application pipeline (timestamped transitions, human-only statuses, reopen guard,
+board, funnel, packets never inventing URLs/deadlines), notifications (thresholds, dedup, outbox,
+webhook only when configured and online), the scheduler (cron parsing, timezone override, due
+logic, failure isolation, crontab/daemon), daily/weekly reports, the dashboard API and a real
+HTTP smoke test, feedback, the learning loop (insufficient data, simulation, back-test, approval,
+synthetic guard, stale base version), and CLI smoke tests. Tests run against a throwaway
+workspace (tests/conftest.py) and never touch the network or the real trackers.
+528/528 tests passing as of V1.7.

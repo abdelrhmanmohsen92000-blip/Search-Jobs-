@@ -214,7 +214,7 @@ def check_application_events(config=None, echo=True):
                        config=config, echo=echo)
         elif status == "OFFER":
             n = notify("OFFER", f"Offer: {a.get('job_title')} @ {a.get('company')}",
-                       "Record the outcome with `career_hunter.py feedback offer <id>` so the learning loop sees it.",
+                       "Offer recorded — review it and decide yourself; nothing is accepted or declined automatically.",
                        dedup_key=a.get("opportunity_id"), job_id=a.get("opportunity_id"), config=config, echo=echo)
         else:
             continue

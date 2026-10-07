@@ -278,6 +278,18 @@ def run_source_adapters(enabled_sources=None, limit_per_source=None, health=None
     return raw_records, source_health
 
 
+def portfolio_evidence_summary(opp, profile=None):
+    """Evidence tiers for one opportunity (shared with re-analysis of stored jobs)."""
+    evidence = combined_portfolio_evidence(opp, profile=profile)
+    if evidence == "PORTFOLIO_DATA_INSUFFICIENT":
+        return "PORTFOLIO_DATA_INSUFFICIENT"
+    return {
+        "direct_project_matches": [e for e in evidence if e.get("evidence_tier") == "DIRECT_PROJECT_EVIDENCE"],
+        "profile_capability_matches": [e for e in evidence if e.get("evidence_tier") == "PROFILE_CAPABILITY"],
+        "regional_matches": [e for e in evidence if e.get("evidence_tier") == "REGIONAL_EXPERIENCE"],
+    }
+
+
 def normalize_and_score(raw_records, profile=None, discovered_via_mode=None, settings=None):
     """VALIDATE -> NORMALIZE -> CLASSIFY MODES -> DEDUPLICATE (+ merge modes
     and sources into the canonical record) -> SCORE -> PORTFOLIO EVIDENCE ->
@@ -332,15 +344,7 @@ def normalize_and_score(raw_records, profile=None, discovered_via_mode=None, set
         # (DIRECT_PROJECT_EVIDENCE > PROFILE_CAPABILITY > REGIONAL_EXPERIENCE)
         # come straight from scripts.intelligence.application_strategy and are
         # never recomputed or weakened here.
-        evidence = combined_portfolio_evidence(opp, profile=profile)
-        if evidence == "PORTFOLIO_DATA_INSUFFICIENT":
-            opp["portfolio_evidence_summary"] = "PORTFOLIO_DATA_INSUFFICIENT"
-        else:
-            opp["portfolio_evidence_summary"] = {
-                "direct_project_matches": [e for e in evidence if e.get("evidence_tier") == "DIRECT_PROJECT_EVIDENCE"],
-                "profile_capability_matches": [e for e in evidence if e.get("evidence_tier") == "PROFILE_CAPABILITY"],
-                "regional_matches": [e for e in evidence if e.get("evidence_tier") == "REGIONAL_EXPERIENCE"],
-            }
+        opp["portfolio_evidence_summary"] = portfolio_evidence_summary(opp, profile)
 
         # V1.4 analysis: requirements, skills gap, 12 dimensions, decision.
         # When no sub-scores were explicitly assessed, the 100-point

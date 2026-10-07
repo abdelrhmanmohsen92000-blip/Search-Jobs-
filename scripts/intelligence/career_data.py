@@ -37,8 +37,13 @@ def find_job(job_id, jobs=None):
 
 
 def to_opportunity(row):
+    """A stored jobs.csv row back to an opportunity dict, with the derived
+    evidence the analysis needs (portfolio evidence) rebuilt from config."""
     from scripts.career_intelligence import opportunity_from_jobs_row
-    return opportunity_from_jobs_row(row)
+    from scripts.daily_research import portfolio_evidence_summary
+    opp = opportunity_from_jobs_row(row)
+    opp["portfolio_evidence_summary"] = portfolio_evidence_summary(opp)
+    return opp
 
 
 def analysis_for(row, company_lookup=None, contacts=None):
