@@ -55,6 +55,10 @@ def init_workspace(workspace):
     """Creates tracking/ with the real trackers' headers (no rows)."""
     workspace = Path(workspace)
     (workspace / "tracking").mkdir(parents=True, exist_ok=True)
+    model = workspace / "config" / "scoring_model.yaml"
+    if not model.exists():  # learning approvals in the demo change this copy, never the real model
+        model.parent.mkdir(parents=True, exist_ok=True)
+        model.write_text((paths.CONFIG_DIR / "scoring_model.yaml").read_text(encoding="utf-8"), encoding="utf-8")
     for f in (paths.ROOT / "tracking").glob("*.csv"):
         target = workspace / "tracking" / f.name
         if not target.exists():

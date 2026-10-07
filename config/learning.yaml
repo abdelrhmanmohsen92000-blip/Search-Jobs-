@@ -1,0 +1,36 @@
+# Learning loop (V1.7) — read by scripts/intelligence/learning_loop.py.
+#
+# The loop compares what the system RECOMMENDED with what actually HAPPENED
+# (applied / interview / rejection / offer, and your job feedback). Once enough
+# outcomes exist it writes LEARNING SUGGESTIONS to data/learning/suggestions/.
+# A suggestion never changes the production model by itself: only
+# `career_hunter.py learning approve <id>` creates a new model version in
+# config/scoring_model.yaml (and only with --activate does it become active).
+
+min_outcomes: 50              # outcomes needed before any weight suggestion is produced
+min_per_group: 5              # minimum positive AND negative outcomes to compare dimensions
+learning_rate: 0.25           # how far one suggestion moves a weight toward the evidence
+max_relative_change: 0.30     # cap on how much one suggestion may change a single weight (30%)
+min_effect: 0.15              # smaller standardized differences are treated as noise
+no_response_after_days: 30    # APPLIED with no update for this long counts as NO_RESPONSE
+
+positive_outcomes: [INTERVIEW, OFFER]
+negative_outcomes: [REJECTED, NO_RESPONSE]
+
+# Opportunity-score weights the loop may adjust, and the analysis dimension each one reads.
+adjustable_weights:
+  overall_match: overall_match
+  company_quality: company_quality
+  career_growth: career_growth
+  compensation: compensation
+  freshness: freshness
+  ease_of_application: ease_of_application     # 100 - application_difficulty
+  networking_value: networking_value
+  strategic_value: strategic_value
+
+# Words in rejection reasons -> the dimension they most likely point at (hints only).
+reason_keywords:
+  experience: [experience, years, senior, junior, gcc, local experience, regional]
+  skills_match: [skill, software, revit, dynamo, tool, technical, portfolio]
+  location_match: [location, visa, relocation, nationality, residency, iqama]
+  compensation: [salary, budget, compensation, pay]

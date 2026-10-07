@@ -19,8 +19,16 @@ MODEL_PATH = paths.CONFIG_DIR / "scoring_model.yaml"
 WEIGHT_GROUPS = ("match_weights", "profile_match_weights", "opportunity_weights")
 
 
+def default_path():
+    """The model file in use: a workspace-local copy (e.g. the demo workspace's
+    config/scoring_model.yaml) when one exists, else the repository's. Learning
+    approvals in an isolated workspace therefore never touch the real model."""
+    local = paths.WORKSPACE / "config" / "scoring_model.yaml"
+    return local if paths.WORKSPACE != paths.ROOT and local.exists() else MODEL_PATH
+
+
 def load_all(path=None):
-    path = Path(path) if path else MODEL_PATH
+    path = Path(path) if path else default_path()
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
@@ -49,7 +57,7 @@ def validate_model(model):
 def create_version(new_version, changes, notes, created_by, activate=False, path=None):
     """Adds a version derived from the active one with `changes` applied
     ({group: {key: value}}). Refuses an invalid model or an existing version."""
-    path = Path(path) if path else MODEL_PATH
+    path = Path(path) if path else default_path()
     data = load_all(path)
     versions = data.setdefault("versions", {})
     if str(new_version) in versions:
@@ -72,7 +80,7 @@ def create_version(new_version, changes, notes, created_by, activate=False, path
 
 
 def set_active(version, path=None):
-    path = Path(path) if path else MODEL_PATH
+    path = Path(path) if path else default_path()
     data = load_all(path)
     if str(version) not in (data.get("versions") or {}):
         raise ValueError(f"Unknown model version {version}")

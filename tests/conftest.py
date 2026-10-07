@@ -23,6 +23,9 @@ def isolated_workspace(tmp_path_factory):
         with open(f, encoding="utf-8") as src:
             header = src.readline()
         (workspace / "tracking" / f.name).write_text(header, encoding="utf-8")
+    (workspace / "config").mkdir()  # workspace-local model copy: no test can change the real model
+    (workspace / "config" / "scoring_model.yaml").write_text(
+        (paths.CONFIG_DIR / "scoring_model.yaml").read_text(encoding="utf-8"), encoding="utf-8")
     os.environ.pop("CAREER_HUNTER_WORKSPACE", None)
     paths.use_workspace(workspace)
     try:
