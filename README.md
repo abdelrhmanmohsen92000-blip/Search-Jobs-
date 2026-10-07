@@ -379,7 +379,7 @@ python career_hunter.py company-sources --run --limit 10        # Phase 4: HIGH-
 ```
 
 **Phase 4.1 additions (Career Search Modes Engine):** `config/career_state.yaml` records the
-user's current primary goal (e.g. `FULL_TIME`) plus any periodic secondary modes (`REMOTE`,
+user's current primary goal (e.g. `FULL_TIME`) plus any periodic secondary modes (`REMOTE_FULL_TIME`,
 `CONTRACT`, `FREELANCE`, `PART_TIME`), each with its own `priority` (HIGH/MEDIUM/LOW),
 `frequency` (daily/weekly/monthly), and employment-type query strategy — editable directly, never
 hard-coded. `scripts/lib/career_state.py` decides which modes are active and due to run (tracked
@@ -393,6 +393,39 @@ python career_hunter.py career-state --show                       # current goal
 python career_hunter.py career-state --dry-run --limit 60          # plan for every due mode, no writes
 python career_hunter.py career-state --mode CONTRACT --region gulf # run one mode regardless of due-ness
 python career_hunter.py career-state --all --limit 100             # run every active mode now
+```
+
+**Phase 4.2 additions (Opportunity Intelligence & Multi-Mode Resolution):** one job can belong
+to several modes but is always **one** canonical record. Each opportunity gets:
+
+| Field | Meaning |
+|---|---|
+| `matched_modes` | Modes proven by explicit evidence only — the `employment_type`/`remote` fields, or phrases such as "full-time", "6-month contract", "freelance", "fully remote". "Architect needed" matches nothing. |
+| `primary_mode` | Highest mode in `ranking.primary_mode_precedence`, or `UNKNOWN`. |
+| `mode_match_reasons` | The evidence behind each matched mode. |
+| `discovered_via_modes` | Which search mode found it — provenance only, never evidence. |
+| `match_score` | The unchanged 100-point fit score. |
+| `mode_priority_score` | 0-100 relevance of the job's modes to `current_primary_goal`. |
+| `career_priority_score` / `career_priority` | `match_score × (floor + (1−floor) × mode_priority/100)` — mode adjusts priority by at most `1−floor` (25% by default), so it can never make a poor match outrank a strong one. |
+| `exceptional_opportunity` / `exceptional_reasons` | Configurable threshold; surfaced and alerted **even outside the current goal**. |
+
+Example: with goal `FULL_TIME`, a full-time job at match 89 ranks above a freelance job at match 96
+for the current goal (89 vs 81.6 career priority), while the freelance job is still the best
+match — and if it clears `exceptional.min_match_score` it appears under **EXCEPTIONAL
+OPPORTUNITIES** with "Outside current primary mode, surfaced because it meets the exceptional
+threshold." Exceptional reasons come only from fields the record actually has (match score,
+explicitly assessed career-value/compensation sub-scores, direct portfolio project evidence,
+explicit remote evidence); reasons such as "prestigious company" or "major project" are never
+generated because nothing in the data model supports them.
+
+Rediscovering a job — under another mode, or at another URL — updates its single `jobs.csv` row:
+modes and source URLs are unioned, existing evidence is never blanked, and priority is recomputed.
+All of it is configured in `config/career_state.yaml` (`ranking`, `exceptional`, `alerts`).
+
+```bash
+python career_hunter.py research --mode full_time --dry-run          # one mode, if due (case-insensitive)
+python career_hunter.py research --all-modes --dry-run --limit 60    # every enabled mode that is due
+python career_hunter.py research --mode freelance --force --dry-run  # --force bypasses the due check only
 ```
 
 **Phase 4 additions (real job acquisition):** `tracking/source_health.csv` now classifies every

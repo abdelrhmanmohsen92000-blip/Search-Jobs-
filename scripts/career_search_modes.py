@@ -38,9 +38,13 @@ def split_limit(modes, total_limit):
     }
 
 
-def run_for_mode(mode, region=None, limit=None, dry_run=False, source_filter=None):
-    """mode: one entry from scripts.lib.career_state.active_modes()."""
-    result = daily_research.run(
+def run_for_mode(mode, region=None, limit=None, dry_run=False, source_filter=None, runner=None):
+    """mode: one entry from scripts.lib.career_state.active_modes().
+    runner: the pipeline entry point (default scripts.daily_research.run;
+    `research --mode` passes scripts.research.run_research so the run also
+    gets a persisted research snapshot)."""
+    runner = runner or daily_research.run
+    result = runner(
         region=region, freelance=mode["freelance_only"], source_filter=source_filter,
         limit=limit, dry_run=dry_run,
         employment_types=mode["employment_types"] or None, mode=mode["name"],
@@ -48,6 +52,55 @@ def run_for_mode(mode, region=None, limit=None, dry_run=False, source_filter=Non
     if not dry_run:
         career_state.record_mode_run(mode["name"])
     return {"mode": mode["name"], "priority": mode["priority"], **result}
+
+
+def select_modes(mode_name=None, all_modes=False, force=False, state=None, runs=None, now=None):
+    """Decides which modes a `research --mode/--all-modes` call runs.
+
+    Without force, a mode that isn't due per its configured frequency is
+    skipped (with the reason). force=True bypasses ONLY that due check — an
+    unknown or disabled mode is still refused. Mode names are
+    case-insensitive (`full_time` == `FULL_TIME`).
+
+    Returns {"selected": [mode, ...], "skipped": [{"mode", "reason"}], "error": str|None}.
+    """
+    state = state if state is not None else career_state.load_career_state()
+    runs = runs if runs is not None else career_state.load_mode_runs()
+    active = career_state.active_modes(state)
+
+    if mode_name:
+        name = mode_name.strip().upper()
+        configured = state.get("search_modes") or {}
+        if name not in configured:
+            return {"selected": [], "skipped": [], "error":
+                    f"Unknown mode '{mode_name}'. Configured modes: {sorted(configured)}"}
+        candidates = [m for m in active if m["name"] == name]
+        if not candidates:
+            return {"selected": [], "skipped": [], "error":
+                    f"Mode '{name}' is disabled in config/career_state.yaml (enabled: false). "
+                    f"--force only bypasses scheduling, not a disabled mode."}
+    elif all_modes:
+        candidates = active
+    else:
+        return {"selected": [], "skipped": [], "error": "No mode requested."}
+
+    if force:
+        return {"selected": candidates, "skipped": [], "error": None}
+
+    due_names = {m["name"] for m in career_state.due_modes(candidates, now=now, runs=runs)}
+    selected = [m for m in candidates if m["name"] in due_names]
+    skipped = [{"mode": m["name"], "reason": f"not due (frequency {m['frequency']}, last run "
+                f"{runs.get(m['name'])}) — use --force to run anyway"}
+               for m in candidates if m["name"] not in due_names]
+    return {"selected": selected, "skipped": skipped, "error": None}
+
+
+def run_selected_modes(selection, region=None, total_limit=None, dry_run=False, source_filter=None, runner=None):
+    """Runs every mode in a select_modes() result, splitting total_limit by priority."""
+    limits = split_limit(selection["selected"], total_limit)
+    return [run_for_mode(m, region=region, limit=limits[m["name"]], dry_run=dry_run,
+                         source_filter=source_filter, runner=runner)
+            for m in selection["selected"]]
 
 
 def run_due_modes(region=None, total_limit=None, dry_run=False, source_filter=None, force_all=False):

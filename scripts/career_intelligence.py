@@ -29,6 +29,8 @@ from scripts.lib import paths, storage  # noqa: E402
 from scripts.lib.normalize import _bool_or_none, _list_or_empty  # noqa: E402
 from scripts.intelligence import ai_provider, company_analyzer, cv_strategy, decision_engine, job_analyzer  # noqa: E402
 from scripts.intelligence.application_strategy import build_strategy  # noqa: E402
+from scripts.intelligence import opportunity_priority  # noqa: E402
+from scripts.lib import opportunity_modes  # noqa: E402
 from scripts.company_intelligence import load_companies  # noqa: E402
 
 SNAPSHOT_PATTERNS = ("daily_opportunities.*.json", "web_import_opportunities.*.json")
@@ -55,7 +57,17 @@ def opportunity_from_jobs_row(row):
     nothing downstream is lost by leaving them empty.
     """
     sub_scores = {key: _float_or_none(row.get(key)) for key in SUB_SCORE_KEYS}
+    matched_modes = opportunity_modes.parse_list(row.get("matched_modes"))
     return {
+        # Phase 4.2 — rows written before these columns existed read back as
+        # matched_modes=[], primary_mode=UNKNOWN, exceptional_opportunity=False.
+        "matched_modes": matched_modes,
+        "discovered_via_modes": opportunity_modes.parse_list(row.get("discovered_via_modes")),
+        "primary_mode": row.get("primary_mode") or opportunity_modes.resolve_primary_mode(matched_modes),
+        "exceptional_opportunity": str(row.get("exceptional_opportunity")) == "True",
+        "exceptional_reasons": opportunity_modes.parse_list(row.get("exceptional_reasons")),
+        "alternate_sources": [{"source": None, "source_url": u}
+                              for u in opportunity_modes.parse_list(row.get("alternate_source_urls"))],
         "id": row.get("id"), "date_found": row.get("date_found"), "source": row.get("source"),
         "source_url": row.get("source_url") or None, "job_title": row.get("job_title"), "company": row.get("company"),
         "country": row.get("country") or None, "city": row.get("city") or None, "region": row.get("region") or None,
@@ -78,6 +90,7 @@ def opportunity_from_jobs_row(row):
             "recommendation": row.get("recommendation"),
             "action": row.get("action"),
             **sub_scores,
+            "sub_scores_explicit": str(row.get("sub_scores_explicit")) == "True",
             "matched_skills": [], "missing_skills": [], "strengths": [], "risks": [],
         },
     }
@@ -146,15 +159,19 @@ def analyze_opportunities(opportunities=None, score_min=0, deep=False):
     opportunities = opportunities if opportunities is not None else load_latest_scored_opportunities()
     company_lookup = _company_lookup()
     tiers = ai_provider.get_tiers()
+    settings = opportunity_priority.load_settings()
     results = []
 
     for opp in opportunities:
+        # Phase 4.2: always recomputed against the CURRENT career state, so a
+        # changed goal re-ranks stored jobs; match_score itself is untouched.
+        opportunity_priority.evaluate_opportunity(opp, settings)
         score = opp.get("match_score") or 0
         if score < score_min:
             continue
 
         tier = 4 if deep else ai_provider.tier_for_score(score, tiers)
-        if tier < 2 and not deep:
+        if tier < 2 and not deep and not opp.get("exceptional_opportunity"):
             continue  # TIER 1: rule-based scoring only, no AI analysis — cost control
 
         company_record = company_lookup.get((opp.get("company") or "").strip().lower())
@@ -187,17 +204,56 @@ def record_decisions(enriched_opportunities):
         decision_engine.record_decision(opp, opp["job_analysis"], opp["decision"], opp["action_priority"])
 
 
-def generate_alerts(enriched_opportunities, company_lookup=None):
+def exceptional_alert_details(opp):
+    """Human-readable explanation built only from fields the opportunity
+    actually carries — never an invented fact."""
+    reasons = opp.get("exceptional_explanations") or [
+        opportunity_priority.REASON_LABELS.get(code, code) for code in opp.get("exceptional_reasons") or []]
+    parts = [f"Match: {opp.get('match_score')}/100",
+             f"Mode: {opportunity_priority.mode_label(opp)}",
+             f"Current goal: {opp.get('current_career_goal') or 'UNKNOWN'}",
+             "Why this matters: " + "; ".join(reasons)]
+    if opp.get("outside_current_goal"):
+        parts.append("This opportunity is outside your current primary mode, but was surfaced because it "
+                     "meets the exceptional threshold.")
+    return " | ".join(parts)
+
+
+def generate_alerts(enriched_opportunities, company_lookup=None, settings=None):
     """Machine-readable alert conditions (V1.4 Phase 20). Written to
     data/alerts/<timestamp>.json, tracking/alerts.csv, and reports/alerts.md.
     Never sent anywhere automatically.
+
+    Phase 4.2: an exceptional opportunity always alerts (EXCEPTIONAL_OPPORTUNITY),
+    even outside the current career goal. A normal high-match alert is
+    suppressed only for a job whose evidence-based modes are KNOWN to be
+    outside the current goal (config: alerts.suppress_high_match_outside_goal);
+    unknown-mode jobs alert exactly as before.
     """
+    settings = settings or opportunity_priority.load_settings()
+    suppress_outside = settings["alerts"].get("suppress_high_match_outside_goal", True)
+    engine_enabled = bool(settings["exceptional"].get("enabled"))
     alerts = []
     now = _dt.datetime.now().isoformat(timespec="seconds")
 
     for opp in enriched_opportunities:
         score = opp.get("match_score") or 0
-        if opp.get("priority") == "EXCEPTIONAL":
+        if "career_priority_score" not in opp:
+            opportunity_priority.evaluate_opportunity(opp, settings)
+        if opp.get("exceptional_opportunity"):
+            alerts.append({"alert_type": "NEW_EXCEPTIONAL_OPPORTUNITY", "severity": "HIGH", "opportunity_id": opp.get("id"),
+                            "company": opp.get("company"), "job_title": opp.get("job_title"),
+                            "details": exceptional_alert_details(opp)})
+        elif suppress_outside and opp.get("outside_current_goal"):
+            pass  # known to be outside the current goal and not exceptional — report only, no alert
+        elif score >= 85 and engine_enabled:
+            alerts.append({"alert_type": "HIGH_MATCH_JOB", "severity": "MEDIUM", "opportunity_id": opp.get("id"),
+                            "company": opp.get("company"), "job_title": opp.get("job_title"),
+                            "details": f"Match score {score}. Mode: {opportunity_priority.mode_label(opp)}; "
+                                       f"current priority {opp.get('career_priority')}."})
+        elif engine_enabled:
+            pass
+        elif opp.get("priority") == "EXCEPTIONAL":  # exceptional engine disabled: original band-based behavior
             alerts.append({"alert_type": "NEW_EXCEPTIONAL_OPPORTUNITY", "severity": "HIGH", "opportunity_id": opp.get("id"),
                             "company": opp.get("company"), "job_title": opp.get("job_title"),
                             "details": f"Match score {score}."})

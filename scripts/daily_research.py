@@ -34,6 +34,8 @@ from scripts.networking_intelligence import generate_networking_queue, load_netw
 from scripts.sources import REGISTRY as SOURCE_REGISTRY  # noqa: E402
 from scripts.intelligence.application_strategy import combined_portfolio_evidence  # noqa: E402
 from scripts.intelligence.ai_provider import tier_for_score  # noqa: E402
+from scripts.intelligence import opportunity_priority  # noqa: E402
+from scripts.lib import opportunity_modes  # noqa: E402
 
 DEFAULT_SUB_SCORES = {  # neutral defaults when a raw record has no explicit scoring input
     "technical": 5, "experience": 5, "software": 5, "project": 5,
@@ -47,7 +49,23 @@ JOBS_FIELDNAMES = [
     "salary_min", "salary_max", "salary_currency", "salary_period", "salary_source", "salary_confidence",
     "technical", "experience", "software", "project", "location", "eligibility", "career_value", "compensation",
     "score", "priority", "recommendation", "action", "status", "notes",
+    # Phase 4.2 — appended at the end so older readers/rows are unaffected;
+    # list values are "|"-separated (see scripts.lib.opportunity_modes.serialize_list).
+    "matched_modes", "discovered_via_modes", "primary_mode", "mode_priority_score",
+    "career_priority_score", "career_priority", "exceptional_opportunity", "exceptional_reasons",
+    "sub_scores_explicit", "alternate_source_urls",
 ]
+
+# Columns that hold evidence/identity: on re-discovery an existing non-empty
+# value is never overwritten (only blanks are filled). Everything else is a
+# derived value and takes the newest computation.
+_EVIDENCE_COLUMNS = (
+    "id", "date_found", "source", "source_url", "job_title", "company", "country", "city", "region", "remote",
+    "employment_type", "required_experience", "skills_required", "software_required", "project_types",
+    "visa_sponsorship", "salary_min", "salary_max", "salary_currency", "salary_period", "salary_source",
+    "salary_confidence",
+)
+_UNION_COLUMNS = ("matched_modes", "discovered_via_modes", "exceptional_reasons", "alternate_source_urls")
 
 SUB_SCORE_KEYS = ("technical", "experience", "software", "project", "location", "eligibility", "career_value", "compensation")
 
@@ -87,7 +105,87 @@ def opportunity_to_jobs_row(o):
     }
     for key in SUB_SCORE_KEYS:
         row[key] = sr.get(key)
+    row.update({
+        "matched_modes": opportunity_modes.serialize_list(o.get("matched_modes")),
+        "discovered_via_modes": opportunity_modes.serialize_list(o.get("discovered_via_modes")),
+        "primary_mode": o.get("primary_mode") or opportunity_modes.UNKNOWN,
+        "mode_priority_score": o.get("mode_priority_score"),
+        "career_priority_score": o.get("career_priority_score"),
+        "career_priority": o.get("career_priority"),
+        "exceptional_opportunity": bool(o.get("exceptional_opportunity")),
+        "exceptional_reasons": opportunity_modes.serialize_list(o.get("exceptional_reasons")),
+        "sub_scores_explicit": sr.get("sub_scores_explicit"),
+        "alternate_source_urls": opportunity_modes.serialize_list(
+            a.get("source_url") for a in (o.get("alternate_sources") or []) if a.get("source_url")),
+    })
     return row
+
+
+def _merge_jobs_row(existing, new, settings):
+    """One canonical row per opportunity: evidence columns keep the first
+    non-empty value, list columns are unioned, primary_mode and the
+    career-priority fields are recomputed from the merged evidence."""
+    merged = dict(existing)
+    for key, value in new.items():
+        if key in _UNION_COLUMNS:
+            combined = opportunity_modes.parse_list(existing.get(key))
+            for v in opportunity_modes.parse_list(value if isinstance(value, str) else
+                                                   opportunity_modes.serialize_list(value)):
+                if v not in combined:
+                    combined.append(v)
+            merged[key] = opportunity_modes.serialize_list(combined)
+        elif key in _EVIDENCE_COLUMNS:
+            if existing.get(key) in (None, ""):
+                merged[key] = value
+        elif value not in (None, ""):
+            merged[key] = value
+
+    precedence = settings["ranking"]["primary_mode_precedence"]
+    modes = opportunity_modes.parse_list(merged.get("matched_modes"))
+    merged["matched_modes"] = opportunity_modes.serialize_list(opportunity_modes._ordered(modes, precedence))
+    merged["primary_mode"] = opportunity_modes.resolve_primary_mode(modes, precedence)
+
+    score = merged.get("score")
+    opp = {
+        "matched_modes": modes, "match_score": float(score) if score not in (None, "") else None,
+        "exceptional_reasons": opportunity_modes.parse_list(merged.get("exceptional_reasons")),
+        "scoring_result": {
+            "sub_scores_explicit": str(merged.get("sub_scores_explicit")) == "True",
+            **{k: float(merged[k]) for k in ("career_value", "compensation") if merged.get(k) not in (None, "")},
+        },
+    }
+    opportunity_priority.evaluate_opportunity(opp, settings)
+    for key in ("mode_priority_score", "career_priority_score", "career_priority", "exceptional_opportunity"):
+        merged[key] = opp[key]
+    merged["exceptional_reasons"] = opportunity_modes.serialize_list(opp["exceptional_reasons"])
+    return merged
+
+
+def upsert_jobs_rows(rows, csv_path=None, settings=None):
+    """Writes rows to tracking/jobs.csv without creating duplicates: a row
+    whose id is already present is merged into the existing row instead of
+    appended. Returns (inserted, updated)."""
+    csv_path = csv_path or paths.JOBS_CSV
+    settings = settings or opportunity_priority.load_settings()
+    existing = storage.read_csv(csv_path)
+    index = {r.get("id"): i for i, r in enumerate(existing) if r.get("id")}
+    inserted = updated = 0
+    for row in rows:
+        i = index.get(row.get("id"))
+        if i is None:  # same job rediscovered at a different URL: existing exact/fuzzy identity rules
+            i = next((j for j, r in enumerate(existing) if dedup_lib.fuzzy_match(row, r)), None)
+            if i is not None and row.get("source_url") and row.get("source_url") != existing[i].get("source_url"):
+                row = {**row, "alternate_source_urls": opportunity_modes.serialize_list(
+                    opportunity_modes.parse_list(row.get("alternate_source_urls")) + [row["source_url"]])}
+        if i is not None:
+            existing[i] = _merge_jobs_row(existing[i], row, settings)
+            updated += 1
+        else:
+            index[row.get("id")] = len(existing)
+            existing.append(row)
+            inserted += 1
+    storage.write_csv(csv_path, JOBS_FIELDNAMES, existing)
+    return inserted, updated
 
 
 def run_source_adapters(enabled_sources=None, limit_per_source=None):
@@ -144,16 +242,21 @@ def run_source_adapters(enabled_sources=None, limit_per_source=None):
     return raw_records, source_health
 
 
-def normalize_and_score(raw_records, profile=None):
-    """VALIDATE -> NORMALIZE -> DEDUPLICATE -> SCORE.
+def normalize_and_score(raw_records, profile=None, discovered_via_mode=None, settings=None):
+    """VALIDATE -> NORMALIZE -> CLASSIFY MODES -> DEDUPLICATE (+ merge modes
+    and sources into the canonical record) -> SCORE -> PORTFOLIO EVIDENCE ->
+    CAREER PRIORITY / EXCEPTIONAL.
 
     Returns (scored, rejected, duplicates):
         scored    - normalized, deduplicated, scored opportunities
         rejected  - records that failed hard validation (no company or no
                     job_title) with a `rejection_reason`; never silently
                     dropped, just excluded from scoring/ranking
-        duplicates - records dropped by deduplication
+        duplicates - records dropped by deduplication (their sources and
+                    modes are folded into the surviving canonical record)
     """
+    settings = settings or opportunity_priority.load_settings()
+    precedence = settings["ranking"]["primary_mode_precedence"]
     normalized = []
     rejected = []
 
@@ -170,14 +273,19 @@ def normalize_and_score(raw_records, profile=None):
             opp.setdefault("risk_flags", []).append(f"VALIDATION_ERROR: {'; '.join(errors)}")
         if sub_scores:
             opp["_sub_scores"] = sub_scores
+        opportunity_modes.apply_mode_classification(opp, discovered_via_mode, precedence)
         normalized.append(opp)
 
     unique, duplicates = dedup_lib.deduplicate(normalized)
+    dedup_lib.attach_duplicates(
+        unique, duplicates, on_merge=lambda c, d: opportunity_modes.merge_mode_data(c, d, precedence))
 
     scored = []
     for opp in unique:
+        explicit_sub_scores = opp.get("_sub_scores") is not None
         sub_scores = opp.pop("_sub_scores", None) or DEFAULT_SUB_SCORES
         result = scoring.score_opportunity_record(opp, sub_scores, profile=profile)
+        result["sub_scores_explicit"] = explicit_sub_scores
         opp["match_score"] = result["score"]
         opp["priority"] = result["priority"]
         opp["reason"] = "; ".join(result["strengths"][:2]) or "Scored with neutral default sub-scores (no explicit assessment provided)."
@@ -199,6 +307,11 @@ def normalize_and_score(raw_records, profile=None):
                 "profile_capability_matches": [e for e in evidence if e.get("evidence_tier") == "PROFILE_CAPABILITY"],
                 "regional_matches": [e for e in evidence if e.get("evidence_tier") == "REGIONAL_EXPERIENCE"],
             }
+        # Career-goal priority and exceptional status (Phase 4.2) — separate
+        # fields next to match_score, which is left untouched. Runs after
+        # portfolio evidence so it can cite direct project evidence, but never
+        # feeds back into that evidence.
+        opportunity_priority.evaluate_opportunity(opp, settings)
         scored.append(opp)
 
     scored.sort(key=lambda o: o.get("match_score") or 0, reverse=True)  # RANK
@@ -243,6 +356,64 @@ def market_intelligence(scored):
     }
 
 
+def _opportunity_block(opp, n, show_exceptional=False):
+    sr = opp.get("scoring_result", {})
+    modes = opp.get("matched_modes") or []
+    lines = [
+        f"{n}. **{opp.get('job_title')} — {opp.get('company')}**",
+        f"   - Match: {opp.get('match_score')}   Current Priority: {opp.get('career_priority') or 'n/a'}"
+        f" (career priority score {opp.get('career_priority_score')})",
+        f"   - {'Modes' if len(modes) > 1 else 'Mode'}: {opportunity_priority.mode_label(opp)}"
+        f"   Primary mode: {opp.get('primary_mode') or 'UNKNOWN'}",
+        f"   - Country: {opp.get('country') or 'n/a'}   Action: {sr.get('action')}",
+    ]
+    if show_exceptional:
+        lines.append(f"   - Exceptional: YES — {'; '.join(opp.get('exceptional_explanations') or opp.get('exceptional_reasons') or [])}")
+        if opp.get("outside_current_goal"):
+            lines.append(f"   - Note: Outside current primary mode ({opp.get('current_career_goal')}), "
+                         f"surfaced because it meets the exceptional threshold.")
+    elif opp.get("exceptional_opportunity"):
+        lines.append("   - Exceptional: YES (see EXCEPTIONAL OPPORTUNITIES)")
+    lines.append(f"   - Application URL: {opp.get('source_url') or 'n/a'}")
+    return lines
+
+
+def opportunity_intelligence_lines(scored, settings=None, limit=10):
+    """Report sections for Phase 4.2: current goal, top opportunities by
+    career priority, exceptional opportunities (including outside the goal),
+    and best-match vs best-current-priority."""
+    settings = settings or opportunity_priority.load_settings()
+    ranked = opportunity_priority.rank_opportunities(scored, settings)
+    lines = [f"**Current Career Goal:** {ranked['current_goal'] or 'UNKNOWN'}", "",
+             "## TOP CURRENT OPPORTUNITIES", "",
+             "_Ordered by career priority: the unchanged match score, weighted by how relevant each job's "
+             "evidence-based mode is to the current goal._", ""]
+    if not scored:
+        lines.append("_None this cycle. See SOURCE HEALTH below for why — most likely all live sources were "
+                     "UNAVAILABLE (network policy) and no manual batch was supplied in `data/raw/`._")
+    for n, opp in enumerate(ranked["top_current"][:limit], 1):
+        lines += _opportunity_block(opp, n) + [""]
+
+    lines += ["## EXCEPTIONAL OPPORTUNITIES", ""]
+    if not ranked["exceptional"]:
+        lines.append("_None meet the exceptional threshold this cycle (config/career_state.yaml `exceptional`)._")
+    for n, opp in enumerate(ranked["exceptional"][:limit], 1):
+        lines += _opportunity_block(opp, n, show_exceptional=True) + [""]
+
+    best_match, best_current = ranked["best_match"], ranked["best_current"]
+    lines += ["", "## BEST MATCH vs BEST FOR CURRENT GOAL", ""]
+    if best_match:
+        lines.append(f"- **Best match:** {best_match.get('job_title')} — {best_match.get('company')} "
+                     f"(match {best_match.get('match_score')}, {opportunity_priority.mode_label(best_match)})")
+        lines.append(f"- **Best for current goal:** {best_current.get('job_title')} — {best_current.get('company')} "
+                     f"(match {best_current.get('match_score')}, career priority {best_current.get('career_priority_score')}, "
+                     f"{opportunity_priority.mode_label(best_current)})")
+    else:
+        lines.append("_No opportunities this cycle._")
+    lines.append("")
+    return lines
+
+
 def generate_daily_report(scored, rejected, duplicates, stats, query_summary, source_health,
                            application_plans, out_path=None):
     out_path = out_path or (paths.REPORTS_DIR / "daily_report.md")
@@ -272,23 +443,7 @@ def generate_daily_report(scored, rejected, duplicates, stats, query_summary, so
                  f"{query_summary['distinct_sources']} sources.")
     lines.append("")
 
-    lines += ["## TOP OPPORTUNITIES", ""]
-    if not scored:
-        lines.append("_None this cycle. See SOURCE HEALTH below for why — most likely all live sources were "
-                      "UNAVAILABLE (network policy) and no manual batch was supplied in `data/raw/`._")
-    for opp in scored[:10]:
-        sr = opp.get("scoring_result", {})
-        lines += [
-            f"### {opp.get('job_title')} — {opp.get('company')}",
-            f"- **Country:** {opp.get('country') or 'n/a'}  **Work mode:** {opp.get('employment_type') or 'n/a'}"
-            f"{' (remote)' if opp.get('remote') else ''}",
-            f"- **Score:** {opp.get('match_score')}  **Priority:** {opp.get('priority')}",
-            f"- **Why it matches:** {'; '.join(sr.get('strengths', [])) or 'n/a'}",
-            f"- **Main risks:** {'; '.join(sr.get('risks', [])) or 'none flagged'}",
-            f"- **Action:** {sr.get('action')}",
-            f"- **Application URL:** {opp.get('source_url') or 'n/a'}",
-            "",
-        ]
+    lines += opportunity_intelligence_lines(scored)
 
     lines += ["## HIDDEN OPPORTUNITIES", "", "Companies worth approaching even without a public vacancy:", ""]
     hidden = hidden_opportunities()
@@ -422,14 +577,17 @@ def run(region=None, remote=False, freelance=False, source_filter=None, limit=No
     raw_records, source_health = run_source_adapters(enabled_sources=enabled, limit_per_source=limit)  # RUN SOURCES / COLLECT
     persistent_source_health = source_health_lib.update_source_health(source_health)  # cross-run health history
 
-    scored, rejected, duplicates = normalize_and_score(raw_records, profile=profile)  # VALIDATE/NORMALIZE/DEDUP/SCORE/RANK
+    settings = opportunity_priority.load_settings()
+    scored, rejected, duplicates = normalize_and_score(raw_records, profile=profile, discovered_via_mode=mode,
+                                                       settings=settings)  # VALIDATE/NORMALIZE/MODES/DEDUP/SCORE/RANK
     stats = build_cycle_stats(raw_records, scored, rejected, duplicates, source_health)
     stats["career_mode"] = mode
 
     storage.save_run_snapshot("processed", "daily_opportunities", scored)  # SAVE
 
     if scored:
-        storage.append_csv_rows(paths.JOBS_CSV, JOBS_FIELDNAMES, [opportunity_to_jobs_row(o) for o in scored])
+        inserted, updated = upsert_jobs_rows([opportunity_to_jobs_row(o) for o in scored], settings=settings)
+        stats["jobs_inserted"], stats["jobs_updated"] = inserted, updated
 
     application_plans = build_plans_for_qualifying(scored)  # application intelligence, score >= 80
     if application_plans:

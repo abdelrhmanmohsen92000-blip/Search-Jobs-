@@ -98,7 +98,31 @@
     "company_canonical": {
       "type": ["string", "null"],
       "description": "Resolved canonical company name when entity resolution is confident (Phase 24); null when not attempted or uncertain."
-    }
+    },
+    "matched_modes": {
+      "type": "array", "items": { "type": "string" }, "default": [],
+      "description": "Phase 4.2: career modes this opportunity belongs to, derived ONLY from explicit evidence (scripts/lib/opportunity_modes.py). Empty when employment type is unknown."
+    },
+    "primary_mode": {
+      "type": ["string", "null"], "default": "UNKNOWN",
+      "description": "Phase 4.2: highest-precedence matched mode (config/career_state.yaml ranking.primary_mode_precedence), or UNKNOWN."
+    },
+    "mode_match_reasons": {
+      "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } },
+      "description": "Phase 4.2: per-mode list of the explicit evidence that matched it."
+    },
+    "discovered_via_modes": {
+      "type": "array", "items": { "type": "string" }, "default": [],
+      "description": "Phase 4.2: provenance — which search mode(s) found this opportunity. Never used as evidence for matched_modes."
+    },
+    "mode_priority_score": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+    "career_priority_score": {
+      "type": ["number", "null"], "minimum": 0, "maximum": 100,
+      "description": "Phase 4.2: match_score scaled by relevance to the current career goal. Separate from match_score, which is never modified."
+    },
+    "career_priority": { "type": ["string", "null"], "enum": ["HIGH", "MEDIUM", "LOW", null] },
+    "exceptional_opportunity": { "type": ["boolean", "null"], "default": false },
+    "exceptional_reasons": { "type": "array", "items": { "type": "string" }, "default": [] }
   },
   "additionalProperties": false
 }

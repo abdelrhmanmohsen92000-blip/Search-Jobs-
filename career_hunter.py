@@ -21,6 +21,8 @@ Commands:
     alerts                                           (generate reports/alerts.md from current tracking data)
     intelligence [--score-min N] [--deep]           (full pipeline: LOAD->ANALYZE->DECIDE->NETWORK->APPLY->REPORT->LEARN)
     research     [--region ...] [--remote] [--freelance] [--source <name>] [--limit N] [--dry-run]  (Phase 3: persisted research-run snapshot)
+                 [--mode <name> | --all-modes] [--force]   (Phase 4.2: career search modes; --force bypasses due checks)
+    career-state [--show] [--mode <name>] [--all] [--dry-run] [--limit N]   (Phase 4.1)
     company-sources --add <name> --url <url> [--source-type <type>] | --list | --run
 
 Examples:
@@ -45,6 +47,9 @@ Examples:
     python career_hunter.py market
     python career_hunter.py intelligence --score-min 70
     python career_hunter.py research --region gulf
+    python career_hunter.py research --mode full_time --dry-run
+    python career_hunter.py research --all-modes --dry-run
+    python career_hunter.py research --mode freelance --force --dry-run
     python career_hunter.py company-sources --add "Acme Architects" --url https://acme.example/careers --source-type architecture_firm
     python career_hunter.py company-sources --list
     python career_hunter.py company-sources --run
@@ -289,6 +294,26 @@ def cmd_research(args):
     (data/research_runs/<run_id>.json) for later trend analysis. Clearly
     reports which providers are available/unavailable — never hides a failure.
     """
+    if args.mode or args.all_modes:
+        selection = career_search_modes.select_modes(mode_name=args.mode, all_modes=args.all_modes, force=args.force)
+        if selection["error"]:
+            print(selection["error"])
+            return
+        for s in selection["skipped"]:
+            print(f"[{s['mode']}] skipped — {s['reason']}")
+        if not selection["selected"]:
+            print("No modes to run.")
+            return
+        if args.force:
+            print("--force: scheduling/due checks bypassed for: " + ", ".join(m["name"] for m in selection["selected"]))
+        results = career_search_modes.run_selected_modes(
+            selection, region=args.region, total_limit=args.limit, dry_run=args.dry_run,
+            source_filter=args.source, runner=research.run_research)
+        for snapshot in results:
+            research.print_research_summary(snapshot)
+        return
+    if args.force:
+        print("Note: --force only applies together with --mode or --all-modes; running a normal research cycle.")
     snapshot = research.run_research(region=args.region, remote=args.remote, freelance=args.freelance,
                                       source_filter=args.source, limit=args.limit, dry_run=args.dry_run)
     research.print_research_summary(snapshot)
@@ -441,6 +466,12 @@ def build_parser():
     p_research = sub.add_parser("research", help="Run one research cycle and persist a research-run snapshot (Phase 3)")
     add_region_flags(p_research)
     p_research.add_argument("--dry-run", action="store_true")
+    mode_group = p_research.add_mutually_exclusive_group()
+    mode_group.add_argument("--mode", default=None,
+                            help="Run one career search mode from config/career_state.yaml (case-insensitive), if due")
+    mode_group.add_argument("--all-modes", action="store_true", help="Run every enabled career search mode that is due")
+    p_research.add_argument("--force", action="store_true",
+                            help="With --mode/--all-modes: bypass the frequency/due check (never a disabled mode)")
     p_research.set_defaults(func=cmd_research)
 
     p_career_state = sub.add_parser("career-state", help="Career Search Modes Engine (Phase 4.1)")

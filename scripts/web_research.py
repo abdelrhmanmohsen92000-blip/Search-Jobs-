@@ -20,7 +20,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.daily_research import DEFAULT_SUB_SCORES, JOBS_FIELDNAMES, opportunity_to_jobs_row  # noqa: E402
+from scripts.daily_research import DEFAULT_SUB_SCORES, opportunity_to_jobs_row, upsert_jobs_rows  # noqa: E402
+from scripts.intelligence import opportunity_priority  # noqa: E402
+from scripts.lib import opportunity_modes  # noqa: E402
 from scripts.lib import config as cfg_lib, dedup as dedup_lib, entity_resolution, normalize as norm_lib  # noqa: E402
 from scripts.lib import paths, scoring, staleness, storage  # noqa: E402
 from scripts.company_intelligence import add_company  # noqa: E402
@@ -81,9 +83,15 @@ def process_search_results(search_results, page_results_by_url=None):
     return candidates, rejected, classification_counts, hidden_opportunity_signals
 
 
-def score_and_finalize(candidates, profile=None):
-    """DEDUPLICATION (with source-preserving merge) -> SCORING -> lifecycle status."""
-    merged, dropped_count = dedup_lib.merge_duplicates(candidates)
+def score_and_finalize(candidates, profile=None, settings=None):
+    """MODES -> DEDUPLICATION (with source- and mode-preserving merge) ->
+    SCORING -> lifecycle status -> career priority / exceptional."""
+    settings = settings or opportunity_priority.load_settings()
+    precedence = settings["ranking"]["primary_mode_precedence"]
+    for c in candidates:
+        opportunity_modes.apply_mode_classification(c, None, precedence)
+    merged, dropped_count = dedup_lib.merge_duplicates(
+        candidates, on_merge=lambda c, d: opportunity_modes.merge_mode_data(c, d, precedence))
 
     company_names = [c.get("company") for c in merged if c.get("company")]
     company_map = entity_resolution.resolve_companies(company_names)
@@ -94,14 +102,17 @@ def score_and_finalize(candidates, profile=None):
         if canonical and canonical != opp.get("company"):
             opp["company_canonical"] = canonical
 
+        explicit_sub_scores = opp.get("_sub_scores") is not None
         sub_scores = opp.pop("_sub_scores", None) or DEFAULT_SUB_SCORES
         result = scoring.score_opportunity_record(opp, sub_scores, profile=profile)
+        result["sub_scores_explicit"] = explicit_sub_scores
         opp["match_score"] = result["score"]
         opp["priority"] = result["priority"]
         opp["reason"] = "; ".join(result["strengths"][:2]) or "Scored with neutral default sub-scores."
         opp["scoring_result"] = result
         opp["status"] = opp.get("status") or "scored"
         opp["lifecycle_status"] = staleness.compute_lifecycle_status(opp)
+        opportunity_priority.evaluate_opportunity(opp, settings)
         scored.append(opp)
 
     scored.sort(key=lambda o: o.get("match_score") or 0, reverse=True)
@@ -111,7 +122,7 @@ def score_and_finalize(candidates, profile=None):
 def save_to_jobs_csv(scored):
     if not scored:
         return
-    storage.append_csv_rows(paths.JOBS_CSV, JOBS_FIELDNAMES, [opportunity_to_jobs_row(o) for o in scored])
+    upsert_jobs_rows([opportunity_to_jobs_row(o) for o in scored])
 
 
 def run_web_import(directory=None, file_path=None, dry_run=False):

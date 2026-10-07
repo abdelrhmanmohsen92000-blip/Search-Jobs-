@@ -40,16 +40,20 @@ def _determine_status(stats, source_health):
     return "PARTIAL"
 
 
-def run_research(region=None, remote=False, freelance=False, source_filter=None, limit=None, dry_run=False):
+def run_research(region=None, remote=False, freelance=False, source_filter=None, limit=None, dry_run=False,
+                 employment_types=None, mode=None):
     """Runs one research cycle via scripts.daily_research.run() and persists
     a research snapshot to data/research_runs/<run_id>.json. Returns the
     snapshot dict (plus the underlying pipeline result under "pipeline_result").
+    mode/employment_types: Phase 4.1/4.2 career search mode (optional;
+    snapshots without a "mode" key — every pre-4.2 snapshot — still load).
     """
     run_id = uuid.uuid4().hex[:12]
     started_at = _dt.datetime.now().isoformat(timespec="seconds")
 
     result = daily_research.run(region=region, remote=remote, freelance=freelance,
-                                 source_filter=source_filter, limit=limit, dry_run=dry_run)
+                                 source_filter=source_filter, limit=limit, dry_run=dry_run,
+                                 employment_types=employment_types, mode=mode)
     completed_at = _dt.datetime.now().isoformat(timespec="seconds")
 
     if result["dry_run"]:
@@ -57,7 +61,7 @@ def run_research(region=None, remote=False, freelance=False, source_filter=None,
             "run_id": run_id, "started_at": started_at, "completed_at": completed_at,
             "queries": result["query_summary"], "providers": [], "results_count": 0,
             "new_jobs": 0, "duplicates": 0, "errors": [], "source_health": [],
-            "status": "DRY_RUN",
+            "status": "DRY_RUN", "mode": mode,
         }
         return {**snapshot, "pipeline_result": result}
 
@@ -81,6 +85,8 @@ def run_research(region=None, remote=False, freelance=False, source_filter=None,
         "errors": errors,
         "source_health": source_health,
         "status": _determine_status(stats, source_health),
+        "mode": mode,
+        "exceptional_count": sum(1 for o in result.get("scored", []) if o.get("exceptional_opportunity")),
     }
 
     paths.DATA_RESEARCH_RUNS.mkdir(parents=True, exist_ok=True)
@@ -107,7 +113,8 @@ def print_research_summary(snapshot):
     """Clear CLI reporting (Phase 3 §17) — every field is printed, nothing
     about a failure is hidden.
     """
-    print(f"Research run {snapshot['run_id']} — status: {snapshot['status']}")
+    mode = snapshot.get("mode")
+    print(f"Research run {snapshot['run_id']} — status: {snapshot['status']}" + (f" — mode: {mode}" if mode else ""))
     if snapshot["status"] == "DRY_RUN":
         print(f"  Dry run — {snapshot['queries']['total_queries']} queries would be generated; nothing executed.")
         return
@@ -118,6 +125,7 @@ def print_research_summary(snapshot):
     print(f"  Results found: {snapshot['results_count']}")
     print(f"  New opportunities: {snapshot['new_jobs']}")
     print(f"  Duplicates: {snapshot['duplicates']}")
+    print(f"  Exceptional opportunities: {snapshot.get('exceptional_count', 0)}")
     if snapshot["errors"]:
         print("  Errors:")
         for e in snapshot["errors"]:

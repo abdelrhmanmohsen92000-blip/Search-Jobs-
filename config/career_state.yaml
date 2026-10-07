@@ -28,7 +28,7 @@ search_modes:
     employment_types: ["Full-time"]
     freelance_only: false
 
-  REMOTE:
+  REMOTE_FULL_TIME:  # renamed from REMOTE (Phase 4.2) to match the opportunity mode it targets
     enabled: true
     priority: MEDIUM
     frequency: daily
@@ -55,6 +55,51 @@ search_modes:
     frequency: weekly
     employment_types: ["Freelance", "Project-based"]
     freelance_only: true
+
+# --- Opportunity Intelligence (Phase 4.2) -----------------------------------
+# Read by scripts/lib/opportunity_modes.py and
+# scripts/intelligence/opportunity_priority.py. These never change the
+# 100-point match_score — they add separate dimensions next to it.
+#
+# An opportunity's matched_modes come ONLY from explicit evidence in the
+# posting (employment_type/remote fields, or explicit phrases such as
+# "full-time", "6-month contract", "freelance" in the title/description).
+# The search mode that happened to discover a job is recorded separately as
+# discovered_via_modes and never counts as evidence.
+ranking:
+  # Deterministic tie-break when a job matches several modes.
+  primary_mode_precedence: [REMOTE_FULL_TIME, FULL_TIME, FREELANCE, PART_TIME, CONTRACT]
+  # mode_priority_score (0-100) for an opportunity = best of its matched modes:
+  current_goal_score: 100          # a matched mode equal to current_primary_goal
+  mode_priority_scores:            # a matched mode that is an enabled search mode, by its priority
+    HIGH: 100
+    MEDIUM: 70
+    LOW: 40
+  inactive_mode_score: 20          # matched mode that is disabled / not configured
+  unknown_mode_score: 50           # no employment-type evidence at all (neither promoted nor buried)
+  # career_priority_score = match_score * (mode_weight_floor + (1 - floor) * mode_priority_score/100)
+  # The floor caps how much mode can pull a score down (0.75 => at most -25%), so mode
+  # adjusts priority but can never turn a poor match into a top one.
+  mode_weight_floor: 0.75
+  career_priority_bands:           # career_priority label from career_priority_score
+    HIGH: 75
+    MEDIUM: 55
+  outside_goal_max_label: MEDIUM   # a job known to be outside the current goal is never labelled HIGH
+
+exceptional:
+  enabled: true
+  min_match_score: 92              # trigger: match_score (0-100) at or above this
+  min_career_value: 9              # trigger: career_value sub-score (0-10 scale, see scripts/lib/scoring.py)...
+  career_value_min_match_score: 80 # ...but only when match_score is also at least this; null disables
+  min_compensation: 9              # supporting reason only: compensation sub-score (0-10)
+  # career_value/compensation only count when the sub-scores were explicitly assessed —
+  # the neutral defaults used for unassessed records never make anything exceptional.
+
+alerts:
+  # true: a normal high-match alert is suppressed for a job KNOWN to be outside the
+  # current goal (it still appears in the report). Exceptional jobs always alert.
+  # Jobs with UNKNOWN employment type are never suppressed.
+  suppress_high_match_outside_goal: true
 
 # Where the user expects this to go next, if anywhere — UNKNOWN/empty by
 # default, never inferred. Set this explicitly when a real transition plan

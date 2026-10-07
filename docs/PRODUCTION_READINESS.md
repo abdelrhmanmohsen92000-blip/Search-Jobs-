@@ -894,3 +894,84 @@ adapters (Remote OK, Remotive) still do not accept an employment-type filter par
 never did, so `employment_types` only shapes the generated query strings for
 PUBLIC_WEB/company-page/browser-queue sources and the report, consistent with how `--freelance`
 already worked before this phase.
+
+---
+
+## PHASE 7 — Opportunity Intelligence & Multi-Mode Resolution
+
+(Called "Phase 4.2" in the task prompt.) Answers three separate questions: *what matches me*
+(`match_score`, unchanged), *what matters for my current goal* (`career_priority_score`), and
+*is anything exceptional* (`exceptional_opportunity`) — see README "Phase 4.2 additions" for the
+field table and examples.
+
+### Audit — what existed vs what was missing
+
+Existed and reused unchanged: the canonical `id` (company + title + location + source URL — mode was
+never part of it), exact+fuzzy dedup with `alternate_sources`, the 100-point scoring with
+`career_value` as an explicit 0-10 sub-score, per-job portfolio evidence, career state with
+priority/frequency, alerts. Missing: per-opportunity mode classification, primary-mode resolution,
+mode merging, goal priority separate from match score, a configurable exceptional engine,
+mode-aware report/alerts, and `research --mode/--all-modes/--force`.
+
+Found and fixed in the same pass: **both writers appended to `tracking/jobs.csv` on every run**, so
+rediscovering a job always created a duplicate row. `daily_research.upsert_jobs_rows()` now merges
+by `id`, falling back to the existing fuzzy identity rule (same company+title similarity >= 0.85
+*and* exact same location) for the same job found at a different URL.
+
+Prompt-vs-repo differences, resolved rather than papered over: the config's `REMOTE` mode was
+renamed `REMOTE_FULL_TIME`; `EXCEPTIONAL_OPPORTUNITY` is implemented as an evaluation overlay on
+every opportunity, not as a search mode (there is nothing to query for "exceptional"); the
+`--mode/--all-modes/--force` flags were added to `research` (Phase 4.1 had put `--mode/--all` on
+`career-state`, which is kept as-is).
+
+### Design decisions
+
+- **Evidence only.** `matched_modes` comes from the structured `employment_type`/`remote` fields
+  or explicit phrases. Deliberately strict patterns: "contract documents" is not contract
+  employment, "remote project sites" is not remote work, and `remote=true` alone does not imply
+  full-time. Negations ("not a full-time role") are not detected — a known limitation; such text
+  would be read as FULL_TIME evidence.
+- **One record.** Mode is not part of identity. Duplicates within a run are folded into the
+  canonical record (`dedup.attach_duplicates`); across runs the CSV row is upserted. Modes, reasons,
+  discovering modes and source URLs are unioned; evidence columns keep their first non-empty
+  value; derived columns take the newest computation; `primary_mode` and priority are recomputed.
+- **Priority never replaces fit.** `career_priority_score = match_score × (0.75 + 0.25 ×
+  mode_priority/100)` by default. A job with UNKNOWN employment type gets a neutral mode score (50)
+  and is never treated as outside the goal. On reload (`career_intelligence.analyze_opportunities`)
+  priority is recomputed against the *current* goal, so changing `current_primary_goal` re-ranks
+  stored jobs without touching their match scores.
+- **Exceptional.** Triggers: `match_score >= exceptional.min_match_score` (92), or an explicitly
+  assessed `career_value >= 9/10` with `match_score >= 80`. The neutral default sub-scores given to
+  unassessed records can never trigger it. Supporting reasons (attached only to already-exceptional
+  jobs): explicitly assessed compensation >= 9/10, direct HIGH-relevance portfolio project
+  evidence, explicit remote evidence. Disabled or unconfigured => nothing is exceptional.
+- **Alerts.** Exceptional => `NEW_EXCEPTIONAL_OPPORTUNITY` (the existing alert type, now with mode,
+  current goal, reasons and an "outside your current primary mode" note). A non-exceptional job
+  *known* to be outside the goal gets no high-match alert (still in the report); UNKNOWN-mode jobs
+  alert exactly as before. Exceptional jobs also bypass the AI-cost tier filter so a low
+  configured threshold can't hide one.
+- **Portfolio evidence is independent.** Mode classification never reads or changes
+  `portfolio_evidence_summary`; a test asserts the summary is identical with and without mode
+  evidence. Only direct project evidence can become an exceptional *reason*, never the reverse.
+
+### Backward compatibility
+
+New `jobs.csv` columns are appended at the end; old rows read back as `matched_modes=[]`,
+`primary_mode=UNKNOWN`, `exceptional_opportunity=False`; the header migrates on the next write
+with old rows preserved. Old snapshots and research-run JSON (no `mode` key) load and print. The
+`research` command without mode flags behaves exactly as before.
+
+### Verification
+
+- 305 pre-existing tests pass unmodified; 60 new (`tests/test_opportunity_intelligence.py`); 365 total.
+  Mutation spot-check: changing the threshold `>=` to `>` and making merges drop existing modes each
+  made a test fail.
+- CLI verified: `career-state --show`; `research --mode full_time --dry-run`;
+  `research --mode freelance --dry-run`; `research --all-modes --dry-run --limit 60`
+  (split 26/17/9/9). `--force` verified against real scheduling state: with FREELANCE marked as just
+  run, the plain call is skipped ("not due … use --force") and the `--force` call runs; `--force`
+  still refuses the disabled PART_TIME mode.
+- **LIVE SOURCE BLOCKED:** a real `research --mode full_time --region gulf --limit 3` run reached
+  Remote OK and Remotive and got `403 Forbidden` from the sandbox egress proxy, as in every prior
+  phase. 0 opportunities were found and none were fabricated, so multi-mode behavior on live jobs
+  is unverified; it is covered only by synthetic `TEST_FIXTURE` records inside the tests.
