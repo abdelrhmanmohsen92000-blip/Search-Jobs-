@@ -166,7 +166,13 @@ def notify_new_jobs(jobs, config=None, echo=True):
 
 
 def check_followups(today=None, config=None, echo=True):
-    from scripts.intelligence import application_pipeline, networking_engine
+    """Application and networking follow-ups that are due."""
+    return (check_application_followups(today, config, echo)
+            + check_networking_followups(today, config, echo))
+
+
+def check_application_followups(today=None, config=None, echo=True):
+    from scripts.intelligence import application_pipeline
     today = today or _dt.date.today()
     out = []
     for a in application_pipeline.due_followups(today=today):
@@ -177,6 +183,13 @@ def check_followups(today=None, config=None, echo=True):
                    config=config, echo=echo)
         if n:
             out.append(n)
+    return out
+
+
+def check_networking_followups(today=None, config=None, echo=True):
+    from scripts.intelligence import networking_engine
+    today = today or _dt.date.today()
+    out = []
     for r in networking_engine.due_followups(today=today):
         n = notify("NETWORKING_FOLLOWUP", f"Networking follow-up: {r.get('contact_type')} @ {r.get('company')}",
                    f"You reached out on {r.get('done_at')}; follow-up due {r.get('follow_up_date')} (draft only, you send it).",

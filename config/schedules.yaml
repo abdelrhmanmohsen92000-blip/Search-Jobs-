@@ -1,0 +1,55 @@
+# Recurring automation (V1.5) — read by scripts/scheduler.py.
+#
+# `cron` is a standard 5-field expression (minute hour day-of-month month
+# day-of-week; 0 or 7 = Sunday) interpreted in `timezone` below. The timezone
+# is not hardcoded: set CAREER_HUNTER_TIMEZONE to override it.
+#
+# How the schedule is driven (pick one — see docs/OPERATIONS.md):
+#   - system cron / Task Scheduler:  */15 * * * *  python career_hunter.py schedule run-due
+#   - local loop:                    python career_hunter.py schedule daemon
+#   - cloud scheduler / routine:     call `python career_hunter.py schedule run-due` periodically
+# `run-due` runs every job whose scheduled time has passed since its last run,
+# so it is safe to call as often as you like.
+#
+# Every task only researches, analyzes, reports and notifies YOU. No task
+# applies to a job, sends an email or message, or contacts anyone.
+
+timezone: Africa/Cairo
+catch_up_hours: 12        # a job missed while the machine was off still runs if missed by less than this
+
+jobs:
+  daily_research:
+    cron: "0 8 * * *"
+    task: research
+    enabled: true
+    description: Research cycle (company career pages, search discovery, configured sources) + analysis
+  daily_report:
+    cron: "15 8 * * *"
+    task: daily_report
+    enabled: true
+    description: Daily Career Brief -> reports/daily_brief.md
+  application_followup:
+    cron: "0 10 * * *"
+    task: application_followup
+    enabled: true
+    description: Application follow-up, interview and offer reminders
+  networking_followup:
+    cron: "15 10 * * *"
+    task: networking_followup
+    enabled: true
+    description: Networking follow-up reminders and refreshed suggestions (drafts only)
+  weekly_market_report:
+    cron: "0 9 * * 0"
+    task: weekly_market_report
+    enabled: true
+    description: Weekly market report (Sunday)
+  weekly_skills_gap_report:
+    cron: "15 9 * * 0"
+    task: weekly_skills_report
+    enabled: true
+    description: Weekly skills gap report (Sunday)
+  company_monitoring:
+    cron: "30 7 * * 1,4"
+    task: company_monitoring
+    enabled: true
+    description: Check configured company career pages and refresh company intelligence (Mon, Thu)

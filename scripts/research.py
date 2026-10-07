@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts import daily_research  # noqa: E402
-from scripts.lib import paths  # noqa: E402
+from scripts.lib import paths, runtime  # noqa: E402
 from scripts.lib import source_health as source_health_lib  # noqa: E402
 
 _NOT_ATTEMPTED = ("NOT_RUN_THIS_CYCLE", "DISABLED", "BROWSER_REQUIRED", "MANUAL", "NOT_IMPLEMENTED",
@@ -98,6 +98,7 @@ def run_research(region=None, remote=False, freelance=False, source_filter=None,
         "errors": errors,
         "source_health": source_health,
         "status": _determine_status(stats, source_health),
+        "network_mode": runtime.network_mode(),
         "mode": mode,
         "exceptional_count": sum(1 for o in result.get("scored", []) if o.get("exceptional_opportunity")),
         # Phase 5 run record
@@ -117,6 +118,8 @@ def run_research(region=None, remote=False, freelance=False, source_filter=None,
         "search_discovery": stats.get("search_discovery") or {},
     }
 
+    if snapshot["network_mode"] == "offline" and not snapshot["new_opportunities"]:
+        snapshot["status"] = "OFFLINE"  # nothing live was requested; not a successful acquisition
     paths.DATA_RESEARCH_RUNS.mkdir(parents=True, exist_ok=True)
     out_path = paths.DATA_RESEARCH_RUNS / f"{run_id}.json"
     out_path.write_text(json.dumps(snapshot, indent=2, default=str), encoding="utf-8")
