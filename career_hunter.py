@@ -608,8 +608,18 @@ def main(argv=None):
     return args.func(args)
 
 
+def _utf8_output():
+    """Windows consoles/pipes may use a legacy code page (cp1252) that cannot print the
+    decision icons; write UTF-8 there instead of crashing."""
+    import sys
+    for stream in (sys.stdout, sys.stderr):
+        if (getattr(stream, "encoding", "") or "").lower().replace("-", "") != "utf8" and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 if __name__ == "__main__":
     import signal
     if hasattr(signal, "SIGPIPE"):  # `career_hunter.py jobs | head` exits quietly
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    _utf8_output()
     raise SystemExit(main() or 0)

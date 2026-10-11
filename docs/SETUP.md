@@ -3,12 +3,12 @@
 ## Requirements
 
 - Python 3.9+ (3.11+ recommended; uses `zoneinfo`)
-- `pip install pyyaml jsonschema pytest`
+- `python -m pip install -r requirements.txt` (pyyaml, jsonschema, tzdata — required on Windows for the scheduler timezone — and pytest)
 - Nothing else: no database, no Node, no web framework. The dashboard uses the Python standard library.
 
 ```bash
 git clone <your repo> && cd Search-Jobs-
-pip install pyyaml jsonschema pytest
+python -m pip install -r requirements.txt
 python -m pytest -q                    # all tests run offline
 python career_hunter.py config --validate
 ```

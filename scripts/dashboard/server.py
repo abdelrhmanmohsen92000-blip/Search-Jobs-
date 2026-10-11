@@ -20,6 +20,10 @@ from scripts.dashboard import api  # noqa: E402
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 MAX_BODY = 64 * 1024
+# Fixed types for our own files: on Windows, mimetypes reads the registry, which often maps
+# .js to text/plain — the browser then refuses to run the dashboard script (nosniff).
+STATIC_TYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml",
+                ".json": "application/json", ".png": "image/png", ".ico": "image/x-icon"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -44,7 +48,8 @@ class Handler(BaseHTTPRequestHandler):
         target = (STATIC_DIR / rel).resolve()
         if STATIC_DIR not in target.parents or not target.is_file():
             return self._send(404, {"error": "Not found"})
-        ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+        ctype = (STATIC_TYPES.get(target.suffix.lower()) or mimetypes.guess_type(str(target))[0]
+                 or "application/octet-stream")
         if ctype.startswith("text/") or ctype.endswith("javascript"):
             ctype += "; charset=utf-8"
         self._send(200, target.read_bytes(), ctype)

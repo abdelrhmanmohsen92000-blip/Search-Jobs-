@@ -20,7 +20,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -46,7 +46,12 @@ def timezone_name(config=None):
 
 
 def timezone(config=None):
-    return ZoneInfo(timezone_name(config))
+    name = timezone_name(config)
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        raise ValueError(f"Time zone {name!r} not found — install the time zone database: "
+                         "python -m pip install tzdata (required on Windows)") from None
 
 
 def _parse_field(text, lo, hi):

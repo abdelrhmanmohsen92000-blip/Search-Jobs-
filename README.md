@@ -37,7 +37,7 @@ Every file from V1.0/V1.1 (profile, templates, docs, CSVs) is preserved.
 ## Quick start (V1.7)
 
 ```bash
-pip install pyyaml jsonschema pytest           # the only dependencies
+python -m pip install -r requirements.txt     # pyyaml, jsonschema, tzdata (needed on Windows), pytest
 
 # 1. Try everything on SYNTHETIC data first (offline, isolated from your real trackers)
 python career_hunter.py demo --with-activity
@@ -154,7 +154,7 @@ tests/                        pytest suite: scoring, dedup, normalization, prior
 ## Installation
 
 ```bash
-pip install pyyaml jsonschema pytest
+python -m pip install -r requirements.txt
 ```
 
 No API keys are required for the two live sources (Remote OK, Remotive are public, unauthenticated
